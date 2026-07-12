@@ -374,8 +374,8 @@
             return Frame
         end
 
-        function library:mouse_in_frame(uiobject)
-            local position = uis:GetMouseLocation()
+        function library:mouse_in_frame(uiobject, position)
+            position = position or uis:GetMouseLocation()
             local y_cond = uiobject.AbsolutePosition.Y <= position.Y and position.Y <= uiobject.AbsolutePosition.Y + uiobject.AbsoluteSize.Y
             local x_cond = uiobject.AbsolutePosition.X <= position.X and position.X <= uiobject.AbsolutePosition.X + uiobject.AbsoluteSize.X
 
@@ -631,26 +631,29 @@
         end
 
         function library:raise_popup(popup, base_zindex)
-            base_zindex = base_zindex or 20
+            base_zindex = base_zindex or 100
             popup.ZIndex = base_zindex
             for _, descendant in popup:GetDescendants() do
                 if descendant:IsA("GuiObject") then
-                    descendant.ZIndex = base_zindex + 1
+                    local original_zindex = descendant:GetAttribute("PopupBaseZIndex")
+                    if original_zindex == nil then
+                        original_zindex = descendant.ZIndex
+                        descendant:SetAttribute("PopupBaseZIndex", original_zindex)
+                    end
+                    descendant.ZIndex = base_zindex + original_zindex
                 end
             end
         end
 
         function library:position_popup(popup, anchor, gap)
             gap = gap or 2
-            local viewport = camera.ViewportSize
             local width = max(anchor.AbsoluteSize.X, popup.AbsoluteSize.X)
-            local height = popup.AbsoluteSize.Y
-            local x = clamp(anchor.AbsolutePosition.X, 2, max(2, viewport.X - width - 2))
-            local below = anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + gap
-            local y = below
 
             popup.Size = dim2(0, width, popup.Size.Y.Scale, popup.Size.Y.Offset)
-            popup.Position = dim_offset(floor(x + 0.5), floor(y + 0.5))
+            popup.Position = dim_offset(
+                floor(anchor.AbsolutePosition.X + 0.5),
+                floor(anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + gap + 0.5)
+            )
         end
 
         function library:tooltip(object, text)
@@ -779,6 +782,26 @@
                 IgnoreGuiInset = true,
             })
 
+            library:connection(uis.InputBegan, function(input, game_event)
+                if game_event or input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                    return
+                end
+
+                local current = library.current_element_open
+                if not current or not current.popup or not current.anchor then
+                    return
+                end
+
+                task.defer(function()
+                    if library.current_element_open == current
+                        and not library:mouse_in_frame(current.popup, input.Position)
+                        and not library:mouse_in_frame(current.anchor, input.Position) then
+                        current.open = false
+                        current.set_visible(false)
+                    end
+                end)
+            end)
+
             -- Window
                 local window_outline = library:create("Frame", {
                     Parent = library.gui;
@@ -817,7 +840,7 @@
                     BorderSizePixel = 0;
                     BackgroundColor3 = themes.preset.background;
                     Active = true;
-                    ZIndex = 40;
+                    ZIndex = 200;
                 });
                 
                 local ui_title = library:create("TextLabel", {
@@ -833,7 +856,7 @@
                     BorderSizePixel = 0;
                     TextSize = 12;
                     BackgroundColor3 = rgb(255, 255, 255);
-                    ZIndex = 41
+                    ZIndex = 201
                 });
 
                 local minimize = library:create("TextButton", {
@@ -848,7 +871,7 @@
                     Text = "-";
                     TextSize = 12;
                     TextColor3 = themes.preset.text;
-                    ZIndex = 42;
+                    ZIndex = 202;
                 })
 
                 library:hover(minimize, function()
@@ -866,7 +889,7 @@
                     Size = dim2(1, -4, 0, 20);
                     BorderSizePixel = 0;
                     BackgroundColor3 = themes.preset.background;
-                    ZIndex = 35
+                    ZIndex = 190
                 }); cfg.tab_button_holder = tab_button_holder
                 
                 library:create("UIListLayout", {
@@ -960,7 +983,7 @@
                         AutomaticSize = Enum.AutomaticSize.XY;
                         TextSize = 12;
                         BackgroundColor3 = rgb(255, 255, 255);
-                        ZIndex = 36
+                        ZIndex = 191
                     });
 
                     tab_button.MouseEnter:Connect(function()
@@ -1893,6 +1916,8 @@
                             PaddingBottom = dim(0, 2);
                             Parent = accent
                         });
+                        cfg.popup = accent
+                        cfg.anchor = dropdown_holder
                         library:raise_popup(accent)
                     --  
                 -- 
@@ -2004,18 +2029,9 @@
                 -- 
 
                 -- Connections 
-                    dropdown_holder.MouseButton1Down:Connect(function()
+                    dropdown_holder.MouseButton1Click:Connect(function()
                         cfg.open = not cfg.open 
                         cfg.set_visible(cfg.open)
-                    end)
-
-                    library:connection(uis.InputEnded, function(input)
-                        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                            if not (library:mouse_in_frame(accent) or library:mouse_in_frame(dropdown)) then 
-                                cfg.open = false
-                                cfg.set_visible(false)
-                            end
-                        end
                     end)
                 -- 
 
@@ -2307,6 +2323,8 @@
                     local dragging_sat = false 
                     local dragging_hue = false 
                     local dragging_alpha = false 
+                    cfg.popup = colorpicker
+                    cfg.anchor = colorpicker_element
                     library:raise_popup(colorpicker)
 
                     local h, s, v = cfg.color:ToHSV() 
@@ -2324,10 +2342,10 @@
                         colorpicker.Visible = bool
                         if bool then
                             library:raise_popup(colorpicker)
-                            library:position_popup(colorpicker, colorpicker_element_color)
+                            library:position_popup(colorpicker, colorpicker_element)
                             task.defer(function()
                                 if colorpicker.Visible then
-                                    library:position_popup(colorpicker, colorpicker_element_color)
+                                    library:position_popup(colorpicker, colorpicker_element)
                                 end
                             end)
                         end
@@ -2366,9 +2384,9 @@
                         cfg.callback(Color, a)
                     end
         
-                    function cfg.update_color() 
-                        local mouse = uis:GetMouseLocation() 
-                        local offset = vec2(mouse.X, mouse.Y) 
+                    function cfg.update_color(position)
+                        local offset = position or uis:GetMouseLocation()
+                        offset = vec2(offset.X, offset.Y)
 
                         if dragging_sat then	
                             s = math.clamp((offset - saturation_value_button.AbsolutePosition).X / saturation_value_button.AbsoluteSize.X, 0, 1)
@@ -2388,7 +2406,7 @@
                 -- 
                 
                 -- Connections 
-                    colorpicker_element.MouseButton1Down:Connect(function()
+                    colorpicker_element.MouseButton1Click:Connect(function()
                         cfg.open = not cfg.open 
 
                         cfg.set_visible(cfg.open)            
@@ -2396,7 +2414,7 @@
 
                     library:connection(uis.InputChanged, function(input)
                         if (dragging_sat or dragging_hue or dragging_alpha) and input.UserInputType == Enum.UserInputType.MouseMovement then
-                            cfg.update_color() 
+                            cfg.update_color(input.Position)
                         end
                     end)
 
@@ -2405,24 +2423,22 @@
                             dragging_sat = false
                             dragging_hue = false
                             dragging_alpha = false  
-
-                            if not (library:mouse_in_frame(colorpicker_element) or library:mouse_in_frame(colorpicker)) then 
-                                cfg.open = false
-                                cfg.set_visible(false)
-                            end
                         end
                     end)
 
-                    alpha_button.MouseButton1Down:Connect(function()
+                    alpha_button.MouseButton1Down:Connect(function(input)
                         dragging_alpha = true 
+                        cfg.update_color(input.Position)
                     end)
                     
-                    hue_button.MouseButton1Down:Connect(function()
+                    hue_button.MouseButton1Down:Connect(function(input)
                         dragging_hue = true 
+                        cfg.update_color(input.Position)
                     end)
                     
-                    saturation_button.MouseButton1Down:Connect(function()
+                    saturation_button.MouseButton1Down:Connect(function(input)
                         dragging_sat = true  
+                        cfg.update_color(input.Position)
                     end)
                     
                     textbox.FocusLost:Connect(function()
@@ -2640,6 +2656,8 @@
                         });
 
                         local options = {"Hold", "Toggle", "Always"}
+                        cfg.popup = accent
+                        cfg.anchor = keybind_holder
                         library:raise_popup(accent)
                         
                         for _, v in options do
@@ -2816,12 +2834,6 @@
                             end
                         end
 
-                        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                            if not (library:mouse_in_frame(keybind_holder) or library:mouse_in_frame(accent)) then 
-                                cfg.open = false
-                                cfg.set_visible(false)
-                            end
-                        end
                     end)
                 --
 
