@@ -1,7 +1,19 @@
+--[[
+    priv9 visual library
+
+    local Visuals = loadstring(...)()
+    local esp = Visuals.new()
+    esp:TrackPlayers({team_check = true})
+
+    This module is standalone. It downloads and registers its own private copies
+    of the ProggyClean and Tahoma/ProggyTiny faces.
+]]
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -44,13 +56,17 @@ local DEFAULTS = {
     max_distance = 2500,
     distance_unit = "st",
     box = true,
-    box_thickness = 1,
+    box_thickness = 2,
+    box_padding = 1,
     box_fill = false,
-    box_fill_transparency = 0.88,
+    box_fill_transparency = 0.92,
     name = true,
     name_gradient = true,
+    name_size = 11,
+    text_size = 11,
     healthbar = true,
     health_text = true,
+    health_width = 4,
     distance = true,
     tool = true,
     tracer = false,
@@ -60,6 +76,29 @@ local DEFAULTS = {
     chams_outline_transparency = 0.1,
     gradient = true,
     gradient_rotation = 0,
+}
+
+local BODY_PART_NAMES = {
+    Head = true,
+    Torso = true,
+    UpperTorso = true,
+    LowerTorso = true,
+    ["Left Arm"] = true,
+    ["Right Arm"] = true,
+    ["Left Leg"] = true,
+    ["Right Leg"] = true,
+    LeftUpperArm = true,
+    LeftLowerArm = true,
+    LeftHand = true,
+    RightUpperArm = true,
+    RightLowerArm = true,
+    RightHand = true,
+    LeftUpperLeg = true,
+    LeftLowerLeg = true,
+    LeftFoot = true,
+    RightUpperLeg = true,
+    RightLowerLeg = true,
+    RightFoot = true,
 }
 
 local function clone(source)
@@ -117,29 +156,68 @@ local function setGuiVisible(objects, visible)
     end
 end
 
-local function getFontSet(ui_library)
-    local shared = ui_library
-    if not shared and getgenv then
-        shared = getgenv().library
-    end
-
-    if shared and shared.fonts then
-        return shared.fonts
-    end
-
+local function getFontSet()
     local fallback = Font.fromEnum(Enum.Font.Code)
-    return {
+    local fonts = {
         ProggyClean = fallback,
+        ProggyTiny = fallback,
         TahomaBold = fallback,
     }
+
+    local asset = getcustomasset or getsynasset
+    if type(isfile) ~= "function" or type(writefile) ~= "function" or type(makefolder) ~= "function" or type(asset) ~= "function" then
+        return fonts
+    end
+
+    local ok, loaded = pcall(function()
+        local directory = "priv9_visuals"
+        local font_directory = directory .. "/fonts"
+        if type(isfolder) ~= "function" or not isfolder(directory) then
+            makefolder(directory)
+        end
+        if type(isfolder) ~= "function" or not isfolder(font_directory) then
+            makefolder(font_directory)
+        end
+
+        local function register(name, file_name, url)
+            local font_path = font_directory .. "/" .. file_name
+            local manifest_path = font_directory .. "/" .. name .. ".font"
+            if not isfile(font_path) then
+                writefile(font_path, game:HttpGet(url))
+            end
+
+            writefile(manifest_path, HttpService:JSONEncode({
+                name = name,
+                faces = {{
+                    name = "Regular",
+                    weight = 200,
+                    style = "Normal",
+                    assetId = asset(font_path),
+                }},
+            }))
+            return Font.new(asset(manifest_path), Enum.FontWeight.Regular, Enum.FontStyle.Normal)
+        end
+
+        local tiny = register(
+            "Priv9VisualTiny",
+            "tahoma_bold.ttf",
+            "https://github.com/i77lhm/storage/raw/refs/heads/main/fonts/tahoma_bold.ttf"
+        )
+        return {
+            ProggyClean = register(
+                "Priv9VisualProggyClean",
+                "ProggyClean.ttf",
+                "https://github.com/i77lhm/storage/raw/refs/heads/main/fonts/ProggyClean.ttf"
+            ),
+            ProggyTiny = tiny,
+            TahomaBold = tiny,
+        }
+    end)
+
+    return ok and loaded or fonts
 end
 
-local function getTheme(ui_library)
-    if ui_library and ui_library.get_theme then
-        return ui_library:get_theme()
-    elseif ui_library and ui_library.theme then
-        return clone(ui_library.theme)
-    end
+local function getTheme()
     return clone(DEFAULT_THEME)
 end
 
@@ -178,54 +256,73 @@ local function getToolName(model)
     return tool and tool.Name or ""
 end
 
-local function healthColor(ratio)
-    local red = rgb(220, 72, 72)
-    local yellow = rgb(220, 190, 72)
-    local green = rgb(70, 190, 105)
-    if ratio < 0.5 then
-        return red:Lerp(yellow, ratio * 2)
+local function isRenderableBodyPart(part, model)
+    if not part:IsA("BasePart") or part.Transparency >= 0.95 or part.Name == "HumanoidRootPart" then
+        return false
     end
-    return yellow:Lerp(green, (ratio - 0.5) * 2)
+    local accessory = part:FindFirstAncestorOfClass("Accessory")
+    local tool = part:FindFirstAncestorOfClass("Tool")
+    return not (accessory and accessory:IsDescendantOf(model)) and not (tool and tool:IsDescendantOf(model))
 end
 
-local function projectModel(model)
+local function getRenderableBodyParts(model)
+    local parts = {}
+    local rig_parts = {}
+    local is_character = model:FindFirstChildOfClass("Humanoid") ~= nil
+    for _, descendant in model:GetDescendants() do
+        if isRenderableBodyPart(descendant, model) then
+            insert(parts, descendant)
+            if BODY_PART_NAMES[descendant.Name] then
+                insert(rig_parts, descendant)
+            end
+        end
+    end
+    return is_character and #rig_parts > 0 and rig_parts or parts
+end
+
+local function projectModel(model, padding, parts)
     if not Camera or not model or not model.Parent then
         return nil
     end
 
-    local ok, box_cframe, box_size = pcall(model.GetBoundingBox, model)
-    if not ok then
-        return nil
-    end
-
-    local half = box_size * 0.5
     local minimum = vec2(math.huge, math.huge)
     local maximum = vec2(-math.huge, -math.huge)
-    local visible_points = 0
+    local projected_points = 0
 
-    for x = -1, 1, 2 do
-        for y = -1, 1, 2 do
-            for z = -1, 1, 2 do
-                local world = box_cframe:PointToWorldSpace(Vector3.new(half.X * x, half.Y * y, half.Z * z))
-                local point, on_screen = Camera:WorldToViewportPoint(world)
-                if point.Z > 0 then
-                    minimum = vec2(min(minimum.X, point.X), min(minimum.Y, point.Y))
-                    maximum = vec2(max(maximum.X, point.X), max(maximum.Y, point.Y))
-                    if on_screen then
-                        visible_points += 1
+    for _, part in parts do
+        if not part.Parent or not isRenderableBodyPart(part, model) then
+            continue
+        end
+        local half = part.Size * 0.5
+        for x = -1, 1, 2 do
+            for y = -1, 1, 2 do
+                for z = -1, 1, 2 do
+                    local world = part.CFrame:PointToWorldSpace(Vector3.new(half.X * x, half.Y * y, half.Z * z))
+                    local point = Camera:WorldToViewportPoint(world)
+                    if point.Z > 0.05 then
+                        minimum = vec2(min(minimum.X, point.X), min(minimum.Y, point.Y))
+                        maximum = vec2(max(maximum.X, point.X), max(maximum.Y, point.Y))
+                        projected_points += 1
                     end
                 end
             end
         end
     end
 
-    if visible_points == 0 or minimum.X == math.huge then
+    if projected_points == 0 or minimum.X == math.huge then
         return nil
     end
 
     local viewport = Camera.ViewportSize
-    minimum = vec2(clamp(minimum.X, 0, viewport.X), clamp(minimum.Y, 0, viewport.Y))
-    maximum = vec2(clamp(maximum.X, 0, viewport.X), clamp(maximum.Y, 0, viewport.Y))
+    if maximum.X < 0 or maximum.Y < 0 or minimum.X > viewport.X or minimum.Y > viewport.Y then
+        return nil
+    end
+
+    local padding_vector = typeof(padding) == "Vector2" and padding or vec2(padding or 0, padding or 0)
+    minimum -= padding_vector
+    maximum += padding_vector
+    minimum = vec2(floor(clamp(minimum.X, 0, viewport.X) + 0.5), floor(clamp(minimum.Y, 0, viewport.Y) + 0.5))
+    maximum = vec2(floor(clamp(maximum.X, 0, viewport.X) + 0.5), floor(clamp(maximum.Y, 0, viewport.Y) + 0.5))
     if maximum.X - minimum.X < 2 or maximum.Y - minimum.Y < 2 then
         return nil
     end
@@ -236,9 +333,8 @@ end
 function Visuals.new(options)
     options = options or {}
     local self = setmetatable({}, Visuals)
-    self.ui_library = options.ui_library
-    self.fonts = getFontSet(self.ui_library)
-    self.theme = merge(getTheme(self.ui_library), options.theme)
+    self.fonts = getFontSet()
+    self.theme = merge(getTheme(), options.theme)
     self.options = merge(DEFAULTS, options.defaults)
     self.enabled = options.enabled ~= false
     self.entities = {}
@@ -353,8 +449,9 @@ function Visuals:Add(target, options)
     objects.right_shadow, objects.right, entity.gradients.right = self:_side(gradient_rotation + 90)
 
     objects.name = self:_text({
-        FontFace = self.fonts.TahomaBold,
+        FontFace = self.fonts.ProggyTiny,
         Text = "",
+        TextSize = entity.options.name_size,
         TextXAlignment = Enum.TextXAlignment.Center,
     })
     entity.gradients.name = self:_gradient(objects.name, nil, gradient_rotation)
@@ -371,22 +468,28 @@ function Visuals:Add(target, options)
         BackgroundColor3 = self.theme.inline,
         ZIndex = 5,
     })
-    objects.health_fill = create("Frame", {
+    objects.health_clip = create("Frame", {
         Parent = self.gui,
-        AnchorPoint = vec2(0, 1),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        ZIndex = 6,
+    })
+    objects.health_fill = create("Frame", {
+        Parent = objects.health_clip,
         BorderSizePixel = 0,
         BackgroundColor3 = rgb(255, 255, 255),
         ZIndex = 6,
     })
     entity.gradients.health = self:_gradient(objects.health_fill, entity.options.health_gradient or {
-        rgb(220, 72, 72),
-        rgb(220, 190, 72),
         rgb(70, 190, 105),
-    }, -90)
+        rgb(220, 190, 72),
+        rgb(220, 72, 72),
+    }, 90)
 
-    objects.health_text = self:_text({Text = "", TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 7})
-    objects.distance = self:_text({Text = "", TextXAlignment = Enum.TextXAlignment.Center})
-    objects.tool = self:_text({Text = "", TextXAlignment = Enum.TextXAlignment.Center})
+    objects.health_text = self:_text({Text = "", TextSize = entity.options.text_size, TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 7})
+    objects.distance = self:_text({Text = "", TextSize = entity.options.text_size, TextXAlignment = Enum.TextXAlignment.Center})
+    objects.tool = self:_text({Text = "", TextSize = entity.options.text_size, TextXAlignment = Enum.TextXAlignment.Center})
     objects.tracer_shadow = create("Frame", {
         Parent = self.gui,
         AnchorPoint = vec2(0, 0.5),
@@ -415,9 +518,6 @@ function Visuals:Add(target, options)
 
     self.entities[target] = entity
     entity:SetOptions(entity.options)
-    if entity.options.gradient_colors then
-        entity:SetGradient(entity.options.gradient_colors, entity.options.gradient_transparency)
-    end
     entity:SetVisible(false)
     return entity
 end
@@ -572,6 +672,14 @@ function Visuals:SetAnimatedGradients(value, speed)
     return self
 end
 
+function Visuals:SetHealthGradient(colors, transparency)
+    for _, entity in self.entities do
+        entity:SetHealthGradient(colors, transparency)
+    end
+    self.options.health_gradient = colors
+    return self
+end
+
 function Visuals:SetTheme(theme)
     for key, value in theme or {} do
         self.theme[key] = value
@@ -585,24 +693,10 @@ end
 
 function Visuals:_step(delta)
     self:_syncFlags()
-    if self.ui_library and self.ui_library.theme then
-        local shared = self.ui_library.theme
-        local changed = false
-        for _, key in {"outline", "inline", "text", "text_outline", "background", "1", "2", "3"} do
-            if shared[key] ~= self.theme[key] then
-                changed = true
-                break
-            end
-        end
-        if changed then
-            self:SetTheme(shared)
-        end
-    end
-
     if self.animated_gradients then
         self.gradient_rotation = (self.gradient_rotation or 0) + (delta * self.gradient_speed)
         for _, record in self.gradients do
-            if record.object and record.object.Parent then
+            if record.linked and record.object and record.object.Parent then
                 record.object.Rotation = record.base_rotation + self.gradient_rotation
             end
         end
@@ -667,6 +761,16 @@ function Entity:SetOptions(options)
     if self.gradients.name then
         self.gradients.name.Enabled = self.options.name_gradient
     end
+    self.objects.name.TextSize = self.options.name_size
+    for _, key in {"health_text", "distance", "tool"} do
+        self.objects[key].TextSize = self.options.text_size
+    end
+    if options and options.gradient_colors then
+        self:SetGradient(options.gradient_colors, options.gradient_transparency)
+    end
+    if options and options.health_gradient then
+        self:SetHealthGradient(options.health_gradient, options.health_gradient_transparency)
+    end
     return self
 end
 
@@ -686,6 +790,16 @@ function Entity:SetGradient(colors, transparency)
             end
         end
     end
+    return self
+end
+
+function Entity:SetHealthGradient(colors, transparency)
+    local gradient = self.gradients.health
+    gradient.Color = colorSequence(colors)
+    if transparency ~= nil then
+        gradient.Transparency = typeof(transparency) == "NumberSequence" and transparency or NumberSequence.new(transparency)
+    end
+    self.options.health_gradient = colors
     return self
 end
 
@@ -712,6 +826,11 @@ function Entity:_update()
         self:SetVisible(false)
         return
     end
+
+    if self.model ~= model then
+        self.model = model
+        self.body_parts = getRenderableBodyParts(model)
+    end
     if options.team_check and self.player and LocalPlayer and self.player.Team ~= nil and self.player.Team == LocalPlayer.Team then
         self:SetVisible(false)
         return
@@ -723,7 +842,11 @@ function Entity:_update()
         return
     end
 
-    local top_left, bottom_right = projectModel(model)
+    local top_left, bottom_right = projectModel(model, options.box_padding, self.body_parts)
+    if not top_left then
+        self.body_parts = getRenderableBodyParts(model)
+        top_left, bottom_right = projectModel(model, options.box_padding, self.body_parts)
+    end
     if not top_left then
         self:SetVisible(false)
         return
@@ -732,7 +855,7 @@ function Entity:_update()
     local objects = self.objects
     local width = bottom_right.X - top_left.X
     local height = bottom_right.Y - top_left.Y
-    local thickness = max(1, options.box_thickness)
+    local thickness = max(1, floor(options.box_thickness + 0.5))
     local shadow_thickness = thickness + 2
     local center_x = top_left.X + width * 0.5
 
@@ -766,46 +889,45 @@ function Entity:_update()
 
     objects.name.Visible = options.name
     objects.name.Text = options.display_name or (self.player and self.player.DisplayName) or model.Name
-    objects.name.Position = fromOffset(top_left.X - 20, top_left.Y - 17)
-    objects.name.Size = fromOffset(width + 40, 14)
+    objects.name.Position = fromOffset(top_left.X - 20, top_left.Y - 14)
+    objects.name.Size = fromOffset(width + 40, 12)
 
     local health = humanoid and humanoid.Health or options.health or 100
     local max_health = humanoid and humanoid.MaxHealth or options.max_health or 100
     local health_ratio = clamp(max_health > 0 and health / max_health or 0, 0, 1)
-    if not options.health_gradient and self.last_health_ratio ~= health_ratio then
-        local health_color = healthColor(health_ratio)
-        self.gradients.health.Color = colorSequence({
-            health_color:Lerp(self.library.theme.outline, 0.35),
-            health_color,
-        })
-        self.last_health_ratio = health_ratio
-    end
     local health_visible = options.healthbar and humanoid ~= nil
+    local health_width = max(2, floor(options.health_width + 0.5))
+    local health_x = top_left.X - health_width - 4
+    local empty_height = floor(height * (1 - health_ratio) + 0.5)
+    local filled_height = max(0, height - empty_height)
     objects.health_outline.Visible = health_visible
     objects.health_background.Visible = health_visible
+    objects.health_clip.Visible = health_visible
     objects.health_fill.Visible = health_visible
-    objects.health_outline.Position = fromOffset(top_left.X - 7, top_left.Y - 1)
-    objects.health_outline.Size = fromOffset(4, height + 2)
-    objects.health_background.Position = fromOffset(top_left.X - 6, top_left.Y)
-    objects.health_background.Size = fromOffset(2, height)
-    objects.health_fill.Position = fromOffset(top_left.X - 6, bottom_right.Y)
-    objects.health_fill.Size = fromOffset(2, floor(height * health_ratio + 0.5))
+    objects.health_outline.Position = fromOffset(health_x - 1, top_left.Y - 1)
+    objects.health_outline.Size = fromOffset(health_width + 2, height + 2)
+    objects.health_background.Position = fromOffset(health_x, top_left.Y)
+    objects.health_background.Size = fromOffset(health_width, height)
+    objects.health_clip.Position = fromOffset(health_x, top_left.Y + empty_height)
+    objects.health_clip.Size = fromOffset(health_width, filled_height)
+    objects.health_fill.Position = fromOffset(0, -empty_height)
+    objects.health_fill.Size = fromOffset(health_width, height)
 
     objects.health_text.Visible = health_visible and options.health_text and health_ratio < 0.995
     objects.health_text.Text = tostring(floor(health + 0.5))
-    objects.health_text.Position = fromOffset(top_left.X - 45, bottom_right.Y - (height * health_ratio) - 7)
-    objects.health_text.Size = fromOffset(35, 12)
+    objects.health_text.Position = fromOffset(health_x - 38, top_left.Y + empty_height - 6)
+    objects.health_text.Size = fromOffset(35, 11)
 
     objects.distance.Visible = options.distance
     objects.distance.Text = string.format("[%d%s]", floor(distance + 0.5), options.distance_unit)
-    objects.distance.Position = fromOffset(top_left.X - 20, bottom_right.Y + 2)
-    objects.distance.Size = fromOffset(width + 40, 12)
+    objects.distance.Position = fromOffset(top_left.X - 20, bottom_right.Y + 1)
+    objects.distance.Size = fromOffset(width + 40, 11)
 
     local tool_name = getToolName(model)
     objects.tool.Visible = options.tool and tool_name ~= ""
     objects.tool.Text = tool_name
-    objects.tool.Position = fromOffset(top_left.X - 20, bottom_right.Y + (options.distance and 14 or 2))
-    objects.tool.Size = fromOffset(width + 40, 12)
+    objects.tool.Position = fromOffset(top_left.X - 20, bottom_right.Y + (options.distance and 12 or 1))
+    objects.tool.Size = fromOffset(width + 40, 11)
 
     objects.tracer.Visible = options.tracer
     objects.tracer_shadow.Visible = options.tracer
