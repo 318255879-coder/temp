@@ -353,7 +353,7 @@ function Visuals.new(options)
     self.gui = create("ScreenGui", {
         Parent = getParent(options.parent),
         Name = options.name or "priv9_visuals",
-        DisplayOrder = options.display_order or 8,
+        DisplayOrder = options.display_order or 0,
         IgnoreGuiInset = true,
         ResetOnSpawn = false,
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
