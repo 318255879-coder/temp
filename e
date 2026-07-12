@@ -76,7 +76,6 @@ local DEFAULTS = {
     chams_outline_transparency = 0.1,
     gradient = true,
     gradient_rotation = 0,
-    update_rate = 60,
 }
 
 local BODY_PART_NAMES = {
@@ -354,9 +353,6 @@ function Visuals.new(options)
     }
     self.animated_gradients = options.animated_gradients or false
     self.gradient_speed = options.gradient_speed or 35
-    self.update_rate = math.max(1, options.update_rate or self.options.update_rate)
-    self.update_interval = 1 / self.update_rate
-    self.update_accumulator = 0
     self.flags = nil
     self.flag_map = nil
     self.flag_values = {}
@@ -375,12 +371,7 @@ function Visuals.new(options)
     end
 
     self.connections.render = RunService.RenderStepped:Connect(function(delta)
-        self.update_accumulator += delta
-        if self.update_accumulator >= self.update_interval then
-            local elapsed = self.update_accumulator
-            self.update_accumulator = 0
-            self:_step(elapsed)
-        end
+        self:_step(delta)
     end)
     self.connections.camera = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
         Camera = Workspace.CurrentCamera
@@ -646,13 +637,6 @@ function Visuals:SetEnabled(value)
     return self
 end
 
-function Visuals:SetUpdateRate(rate)
-    self.update_rate = math.max(1, tonumber(rate) or 60)
-    self.update_interval = 1 / self.update_rate
-    self.update_accumulator = 0
-    return self
-end
-
 function Visuals:SetOptions(options)
     for key, value in options or {} do
         self.options[key] = value
@@ -677,6 +661,24 @@ function Visuals:SetGradient(colors, transparency, from_theme)
             record.object.Color = sequence
             if transparency ~= nil then
                 record.object.Transparency = typeof(transparency) == "NumberSequence" and transparency or NumberSequence.new(transparency)
+            end
+        end
+    end
+    -- Each box edge owns its gradient. Refresh them directly as well so changing
+    -- a picker always affects existing boxes, not just text/tracer records.
+    for _, entity in self.entities do
+        for _, key in {"top", "bottom", "left", "right"} do
+            local edge = entity.objects[key]
+            local gradient = entity.gradients[key]
+            if edge and edge.Parent then
+                edge.BackgroundColor3 = entity.options.gradient ~= false and rgb(255, 255, 255) or self.theme["1"]
+            end
+            if gradient and gradient.Parent then
+                gradient.Enabled = entity.options.gradient ~= false
+                gradient.Color = sequence
+                if transparency ~= nil then
+                    gradient.Transparency = typeof(transparency) == "NumberSequence" and transparency or NumberSequence.new(transparency)
+                end
             end
         end
     end
@@ -781,11 +783,11 @@ function Entity:SetOptions(options)
     self.objects.highlight.FillTransparency = self.options.chams_fill_transparency
     self.objects.highlight.OutlineTransparency = self.options.chams_outline_transparency
     for _, key in {"top", "bottom", "left", "right"} do
-        local gradient = self.objects[key]:FindFirstChildOfClass("UIGradient")
+        local gradient = self.gradients[key]
         if gradient then
             gradient.Enabled = self.options.gradient
         end
-        self.objects[key].BackgroundColor3 = self.library.theme["1"]
+        self.objects[key].BackgroundColor3 = self.options.gradient and rgb(255, 255, 255) or self.library.theme["1"]
     end
     if self.gradients.name then
         self.gradients.name.Enabled = self.options.name_gradient
