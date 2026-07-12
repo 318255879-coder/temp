@@ -60,13 +60,17 @@
 
 -- Library init
     getgenv().library = {
-        directory = "priv9",
+        name = "Fyntra",
+        game = "examplegame",
+        directory = "fyntra/examplegame",
         folders = {
             "/fonts",
             "/configs",
+            "/theme",
         },
         flags = {},
         config_flags = {},
+        ignored_config_flags = {},
 
         connections = {},   
         gradients = {},
@@ -84,19 +88,19 @@
     
     local themes = {
         preset = {
-            accent = hex("#245771"),
-            outline = rgb(10, 10, 10),
-            inline = rgb(35, 35, 35),
-            panel = rgb(24, 24, 24),
-            text = rgb(180, 180, 180),
-            text_outline = rgb(0, 0, 0),
-            background = rgb(20, 20, 20),
-            surface = rgb(27, 27, 27),
-            muted = rgb(125, 125, 125),
+            accent = hex("#8B6CFF"),
+            outline = hex("#07080D"),
+            inline = hex("#272A36"),
+            panel = hex("#1B1D27"),
+            text = hex("#E7E8F2"),
+            text_outline = hex("#050509"),
+            background = hex("#11131A"),
+            surface = hex("#323646"),
+            muted = hex("#9296A8"),
             -- Legacy aliases kept for old scripts. All fills now use one accent.
-            ["1"] = hex("#245771"), 
-            ["2"] = hex("#245771"),
-            ["3"] = hex("#245771"),
+            ["1"] = hex("#8B6CFF"), 
+            ["2"] = hex("#8B6CFF"),
+            ["3"] = hex("#8B6CFF"),
         },
 
         utility = {
@@ -156,28 +160,32 @@
     }
 
     library.themes = {
+        Fyntra = table.clone(themes.preset),
         Default = table.clone(themes.preset),
-        Graphite = {
-            accent = hex("#4E718A"),
-            outline = rgb(8, 8, 8),
-            inline = rgb(36, 36, 36),
-            panel = rgb(27, 27, 27),
-            background = rgb(18, 18, 18),
-            surface = rgb(29, 29, 29),
-            text = rgb(190, 190, 190),
-            muted = rgb(125, 125, 125),
-            text_outline = rgb(0, 0, 0),
+        Obsidian = {
+            accent = hex("#5CC8FF"), outline = hex("#05070A"), inline = hex("#202731"),
+            panel = hex("#161B22"), background = hex("#0D1117"), surface = hex("#2B3440"),
+            text = hex("#E6EDF3"), muted = hex("#8B98A5"), text_outline = hex("#020304"),
         },
-        Midnight = {
-            accent = hex("#385C88"),
-            outline = rgb(6, 8, 12),
-            inline = rgb(25, 29, 36),
-            panel = rgb(20, 23, 29),
-            background = rgb(14, 17, 22),
-            surface = rgb(31, 36, 44),
-            text = rgb(198, 204, 214),
-            muted = rgb(119, 127, 140),
-            text_outline = rgb(0, 0, 0),
+        Ember = {
+            accent = hex("#FF704D"), outline = hex("#0B0706"), inline = hex("#352724"),
+            panel = hex("#261B19"), background = hex("#17100F"), surface = hex("#44302B"),
+            text = hex("#F5E9E5"), muted = hex("#B0968E"), text_outline = hex("#050202"),
+        },
+        Orchid = {
+            accent = hex("#E06CFF"), outline = hex("#080509"), inline = hex("#302335"),
+            panel = hex("#211825"), background = hex("#140F17"), surface = hex("#3B2B42"),
+            text = hex("#F1E7F4"), muted = hex("#A98EAF"), text_outline = hex("#030203"),
+        },
+        Verdant = {
+            accent = hex("#5FE1A1"), outline = hex("#040906"), inline = hex("#20342A"),
+            panel = hex("#17251E"), background = hex("#0D1611"), surface = hex("#294436"),
+            text = hex("#E4F3EA"), muted = hex("#88A897"), text_outline = hex("#020503"),
+        },
+        Arctic = {
+            accent = hex("#63A9FF"), outline = hex("#05080D"), inline = hex("#233044"),
+            panel = hex("#182131"), background = hex("#0E1520"), surface = hex("#2D405A"),
+            text = hex("#E7EFF9"), muted = hex("#8FA2BA"), text_outline = hex("#020407"),
         },
     }
     
@@ -238,8 +246,21 @@
         
     library.__index = library
 
+    local function ensure_folder(path)
+        if type(makefolder) ~= "function" then
+            return false
+        end
+        local exists = type(isfolder) == "function" and isfolder(path)
+        if not exists then
+            return pcall(makefolder, path)
+        end
+        return true
+    end
+
+    ensure_folder("fyntra")
+    ensure_folder(library.directory)
     for _, path in next, library.folders do 
-        makefolder(library.directory .. path)
+        ensure_folder(library.directory .. path)
     end
 
     local flags = library.flags 
@@ -298,11 +319,18 @@
 -- Library functions 
     -- Misc functions
         function library:tween(obj, properties, duration, easing_style, easing_direction) 
-            local tween = tween_service:Create(
-                obj,
-                TweenInfo.new(duration or 0.18, easing_style or Enum.EasingStyle.Quad, easing_direction or Enum.EasingDirection.Out),
-                properties
-            )
+            if not obj or not obj.Parent or type(properties) ~= "table" then
+                return nil
+            end
+            duration = max(0, tonumber(duration) or 0.18)
+            local ok, tween = pcall(function()
+                return tween_service:Create(
+                    obj,
+                    TweenInfo.new(duration, easing_style or Enum.EasingStyle.Quad, easing_direction or Enum.EasingDirection.Out),
+                    properties
+                )
+            end)
+            if not ok then return nil end
             tween:Play()
             return tween
         end 
@@ -310,8 +338,8 @@
         function library:close_current_element(cfg) 
             local path = library.current_element_open
 
-            if path and path ~= cfg then
-                path.set_visible(false)
+            if path and path ~= cfg and type(path.set_visible) == "function" then
+                pcall(path.set_visible, false)
                 path.open = false 
             end
         end 
@@ -443,7 +471,11 @@
             local values = {}
 
             for value in string.gmatch(str, "[^,]+") do
-                insert(values, tonumber(value))
+                local parsed = tonumber(value)
+                if parsed == nil then
+                    return
+                end
+                insert(values, parsed)
             end
             
             if #values == 4 then              
@@ -454,6 +486,7 @@
         end
         
         function library:convert_enum(enum)
+            if type(enum) ~= "string" then return enum end
             local enum_parts = {}
         
             for part in string.gmatch(enum, "[%w_]+") do
@@ -463,48 +496,120 @@
             local enum_table = Enum
             for i = 2, #enum_parts do
                 local enum_item = enum_table[enum_parts[i]]
-        
+                if enum_item == nil then return nil end
                 enum_table = enum_item
             end
         
             return enum_table
         end
 
-        local config_holder;
-        function library:update_config_list() 
-            if not config_holder then 
-                return 
-            end
-            
-            local list = {}
-            
-            for idx, file in listfiles(library.directory .. "/configs") do
-                local name = file:gsub(library.directory .. "/configs\\", ""):gsub(".cfg", ""):gsub(library.directory .. "\\configs\\", "")
-                list[#list + 1] = name
-            end
-            
+        local config_holder
+        local theme_holder
+        local config_directory = library.directory .. "/configs"
+        local theme_directory = library.directory .. "/theme"
+        local config_autoload_path = config_directory .. "/autoload.txt"
+        local theme_autoload_path = theme_directory .. "/autoload.txt"
+        library.paths = {
+            configs = config_directory,
+            themes = theme_directory,
+            config_autoload = config_autoload_path,
+            theme_autoload = theme_autoload_path,
+        }
 
-            config_holder.refresh_options(list)
-        end 
+        function library:sanitize_name(value)
+            local name = tostring(value or ""):gsub("[^%w _%-]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            return string.sub(name, 1, 64)
+        end
+
+        local function safe_read(path)
+            if type(isfile) ~= "function" or type(readfile) ~= "function" then
+                return nil
+            end
+            local checked, exists = pcall(isfile, path)
+            if not checked or not exists then return nil end
+            local ok, content = pcall(readfile, path)
+            return ok and content or nil
+        end
+
+        local function safe_write(path, content)
+            if type(writefile) ~= "function" then
+                return false
+            end
+            return pcall(writefile, path, content)
+        end
+
+        local function safe_delete(path)
+            if type(isfile) ~= "function" or type(delfile) ~= "function" then
+                return false
+            end
+            local checked, exists = pcall(isfile, path)
+            if not checked or not exists then return false end
+            return pcall(delfile, path)
+        end
+
+        local function list_named_files(directory, extension)
+            local results = {}
+            if type(listfiles) ~= "function" then
+                return results
+            end
+            local ok, files = pcall(listfiles, directory)
+            if not ok or type(files) ~= "table" then
+                return results
+            end
+            local pattern = "([^/\\]+)%." .. extension .. "$"
+            for _, file in files do
+                local name = tostring(file):match(pattern)
+                if name and name ~= "autoload" then
+                    insert(results, name)
+                end
+            end
+            table.sort(results)
+            return results
+        end
+
+        function library:update_config_list() 
+            local list = list_named_files(config_directory, "cfg")
+            if config_holder then
+                config_holder.refresh_options(list)
+            end
+            return list
+        end
+
+        function library:update_theme_list()
+            local list = list_named_files(theme_directory, "json")
+            if theme_holder then
+                theme_holder.refresh_options(list)
+            end
+            return list
+        end
 
         function library:get_config()
             local Config = {}
         
             for _, v in flags do
-                if type(v) == "table" and v.key then
+                if library.ignored_config_flags[_] then
+                    continue
+                elseif type(v) == "table" and v.key ~= nil then
                     Config[_] = {active = v.active, mode = v.mode, key = tostring(v.key)}
-                elseif type(v) == "table" and v["Transparency"] and v["Color"] then
+                elseif type(v) == "table" and v["Transparency"] ~= nil and typeof(v["Color"]) == "Color3" then
                     Config[_] = {Transparency = v["Transparency"], Color = v["Color"]:ToHex()}
                 else
                     Config[_] = v
                 end
             end 
-            
-            return http_service:JSONEncode(Config)
+
+            local ok, encoded = pcall(http_service.JSONEncode, http_service, Config)
+            return ok and encoded or "{}"
         end
 
         function library:load_config(config_json) 
-            local config = http_service:JSONDecode(config_json)
+            if type(config_json) ~= "string" then
+                return false
+            end
+            local ok, config = pcall(http_service.JSONDecode, http_service, config_json)
+            if not ok or type(config) ~= "table" then
+                return false
+            end
             
             for _, v in next, config do 
                 local function_set = library.config_flags[_]
@@ -514,19 +619,94 @@
                 end
 
                 if function_set then 
-                    if type(v) == "table" and v["Transparency"] and v["Color"] then
-                        function_set(hex(v["Color"]), v["Transparency"])
-                    elseif type(v) == "table" and v["active"] then 
-                        function_set(v)
-                    else
-                        function_set(v)
-                    end
+                    pcall(function()
+                        if type(v) == "table" and v["Transparency"] ~= nil and type(v["Color"]) == "string" then
+                            function_set(hex(v["Color"]), v["Transparency"])
+                        elseif type(v) == "table" and v["active"] ~= nil then 
+                            function_set(v)
+                        else
+                            function_set(v)
+                        end
+                    end)
                 end 
             end 
+            return true
         end 
+
+        function library:save_config(name)
+            name = library:sanitize_name(name)
+            return name ~= "" and safe_write(config_directory .. "/" .. name .. ".cfg", library:get_config())
+        end
+
+        function library:load_config_file(name)
+            name = library:sanitize_name(name)
+            local content = name ~= "" and safe_read(config_directory .. "/" .. name .. ".cfg")
+            return content ~= nil and library:load_config(content) or false
+        end
+
+        function library:delete_config(name)
+            name = library:sanitize_name(name)
+            return name ~= "" and safe_delete(config_directory .. "/" .. name .. ".cfg")
+        end
+
+        function library:save_theme(name)
+            name = library:sanitize_name(name)
+            if name == "" then return false end
+            local data = {}
+            for _, key in {"accent", "outline", "inline", "panel", "background", "surface", "text", "muted", "text_outline"} do
+                local value = themes.preset[key]
+                if typeof(value) == "Color3" then
+                    data[key] = value:ToHex()
+                end
+            end
+            local ok, encoded = pcall(http_service.JSONEncode, http_service, data)
+            return ok and safe_write(theme_directory .. "/" .. name .. ".json", encoded)
+        end
+
+        function library:load_theme_file(name)
+            name = library:sanitize_name(name)
+            local content = name ~= "" and safe_read(theme_directory .. "/" .. name .. ".json")
+            if not content then return false end
+            local ok, decoded = pcall(http_service.JSONDecode, http_service, content)
+            if not ok or type(decoded) ~= "table" then return false end
+            local palette = {}
+            for key, value in decoded do
+                if themes.utility[key] and type(value) == "string" then
+                    local color_ok, parsed = pcall(hex, value)
+                    if color_ok then palette[key] = parsed end
+                end
+            end
+            return library:load_theme(palette)
+        end
+
+        function library:delete_theme(name)
+            name = library:sanitize_name(name)
+            return name ~= "" and safe_delete(theme_directory .. "/" .. name .. ".json")
+        end
+
+        function library:set_autoload(kind, name)
+            name = library:sanitize_name(name)
+            if name == "" then return false end
+            local path = kind == "theme" and theme_autoload_path or config_autoload_path
+            return safe_write(path, name)
+        end
+
+        function library:clear_autoload(kind)
+            return safe_delete(kind == "theme" and theme_autoload_path or config_autoload_path)
+        end
+
+        function library:load_autoloads()
+            local config_name = safe_read(config_autoload_path)
+            if config_name then library:load_config_file(config_name) end
+            local theme_name = safe_read(theme_autoload_path)
+            if theme_name then library:load_theme_file(theme_name) end
+        end
         
         function library:round(number, float) 
-            local multiplier = 1 / (float or 1)
+            number = tonumber(number) or 0
+            float = abs(tonumber(float) or 1)
+            if float <= 0 then float = 1 end
+            local multiplier = 1 / float
 
             return floor(number * multiplier + 0.5) / multiplier
         end 
@@ -538,15 +718,18 @@
         end
 
         function library:update_theme(theme, color)
-            if not themes.preset[theme] or not themes.utility[theme] then
+            if typeof(color) ~= "Color3" or not themes.preset[theme] or not themes.utility[theme] then
                 return false
             end
 
             local targets = theme == "accent" and {"accent", "1", "2", "3"} or {theme}
             for _, target in targets do
                 for property_name, objects in themes.utility[target] do
-                    for _, object in objects do
-                        if object and object.Parent then
+                    for index = #objects, 1, -1 do
+                        local object = objects[index]
+                        if not object or not object.Parent then
+                            remove(objects, index)
+                        else
                             object[property_name] = color
                         end
                     end
@@ -556,7 +739,7 @@
 
             library:refresh_gradients()
             for _, callback in library.theme_callbacks do
-                callback(theme, color)
+                pcall(callback, theme, color)
             end
             return true
         end 
@@ -601,6 +784,7 @@
         end
 
         function library:set_theme(values)
+            if type(values) ~= "table" then return library:get_theme() end
             for key, value in values do
                 if typeof(value) == "Color3" then
                     library:update_theme(tostring(key), value)
@@ -652,15 +836,49 @@
         end
 
         function library:position_popup(popup, anchor, gap)
-            gap = gap or 0
-            local width = max(anchor.AbsoluteSize.X, popup.AbsoluteSize.X)
-            local x = anchor.AbsolutePosition.X + (anchor.AbsoluteSize.X - width) * 0.5
+            if not popup or not popup.Parent or not anchor or not anchor.Parent then
+                return false
+            end
 
+            gap = tonumber(gap) or 2
+            local width_mode = popup:GetAttribute("PopupWidthMode")
+            local width = if width_mode == "Anchor" then anchor.AbsoluteSize.X
+                elseif width_mode == "Fixed" then (popup:GetAttribute("PopupFixedWidth") or popup.AbsoluteSize.X)
+                else max(anchor.AbsoluteSize.X, popup.AbsoluteSize.X)
+            local viewport_width = camera and camera.ViewportSize.X or width
+            local absolute_x = anchor.AbsolutePosition.X + (anchor.AbsoluteSize.X - width) * 0.5
+            absolute_x = clamp(absolute_x, 2, max(2, viewport_width - width - 2))
+            local absolute_y = anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + gap
+            local parent_position = popup.Parent:IsA("GuiObject") and popup.Parent.AbsolutePosition or vec2(0, 0)
+
+            popup.AnchorPoint = vec2(0, 0)
             popup.Size = dim2(0, width, popup.Size.Y.Scale, popup.Size.Y.Offset)
             popup.Position = dim_offset(
-                floor(x + 0.5),
-                floor(anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + gap + 0.5)
+                floor(absolute_x - parent_position.X + 0.5),
+                floor(absolute_y - parent_position.Y + 0.5)
             )
+            return true
+        end
+
+        function library:follow_popup(cfg, popup, anchor, visible)
+            if cfg.popup_connection then
+                cfg.popup_connection:Disconnect()
+                cfg.popup_connection = nil
+            end
+
+            if not visible then
+                return
+            end
+
+            library:position_popup(popup, anchor)
+            cfg.popup_connection = library:connection(run.RenderStepped, function()
+                if popup.Visible and popup.Parent and anchor.Parent then
+                    library:position_popup(popup, anchor)
+                else
+                    cfg.open = false
+                    cfg.set_visible(false)
+                end
+            end)
         end
 
         function library:tooltip(object, text)
@@ -709,6 +927,13 @@
         end
 
         function library:connection(signal, callback)
+            if not signal or type(callback) ~= "function" then return nil end
+            for index = #library.connections, 1, -1 do
+                local existing = library.connections[index]
+                if not existing or not existing.Connected then
+                    remove(library.connections, index)
+                end
+            end
             local connection = signal:Connect(callback)
             
             insert(library.connections, connection)
@@ -742,7 +967,6 @@
             end
             
             if instance == "TextLabel" or instance == "TextButton" or instance == "TextBox" then 	
-                library:apply_theme(ins, "text", "TextColor3")
                 library:apply_stroke(ins)
             end
             
@@ -772,7 +996,7 @@
     -- Library element functions
         function library:window(properties)
             local cfg = {
-                name = properties.name or properties.Name or "priv9",
+                name = properties.name or properties.Name or "Fyntra",
                 size = properties.size or properties.Size or dim2(0, 600, 0, 400), 
                 min_size = properties.min_size or dim2(0, 420, 0, 280),
                 max_size = properties.max_size,
@@ -855,9 +1079,9 @@
                 local title_holder = library:create("Frame", {
                     Parent = window_outline;
                     BackgroundTransparency = 0;
-                    Position = dim2(0, 2, 0, 2);
+                    Position = dim2(0, 1, 0, 1);
                     BorderColor3 = rgb(0, 0, 0);
-                    Size = dim2(1, -4, 0, 20);
+                    Size = dim2(1, -2, 0, 20);
                     BorderSizePixel = 0;
                     BackgroundColor3 = themes.preset.background;
                     Active = true;
@@ -905,9 +1129,9 @@
                 local tab_button_holder = library:create("Frame", {
                     Parent = window_outline;
                     BackgroundTransparency = 0;
-                    Position = dim2(0, 2, 0, 24);
+                    Position = dim2(0, 1, 0, 22);
                     BorderColor3 = rgb(0, 0, 0);
-                    Size = dim2(1, -4, 0, 20);
+                    Size = dim2(1, -2, 0, 20);
                     BorderSizePixel = 0;
                     BackgroundColor3 = themes.preset.background;
                     ZIndex = 190
@@ -963,6 +1187,10 @@
                     return
                 end
                 cfg.minimized = next_value
+                if library.current_element_open then
+                    library.current_element_open.set_visible(false)
+                    library.current_element_open.open = false
+                end
                 tab_button_holder.Visible = not cfg.minimized
                 resize_handle.Visible = not cfg.minimized
                 if cfg.selected_tab then
@@ -970,7 +1198,7 @@
                 end
                 if cfg.minimized then
                     cfg.restore_size = window_outline.Size
-                    window_outline.Size = dim2(0, max(180, window_outline.AbsoluteSize.X), 0, 24)
+                    window_outline.Size = dim2(0, max(180, window_outline.AbsoluteSize.X), 0, 22)
                     minimize.Text = "+"
                 else
                     window_outline.Size = cfg.restore_size or cfg.size
@@ -1023,9 +1251,9 @@
                     local Page = library:create("Frame", {
                         Parent = self.main_outline;
                         BackgroundTransparency = 0;
-                        Position = dim2(0, 2, 0, 46);
+                        Position = dim2(0, 1, 0, 43);
                         BorderColor3 = rgb(0, 0, 0);
-                        Size = dim2(1, -4, 1, -48);
+                        Size = dim2(1, -2, 1, -44);
                         BorderSizePixel = 0;
                         BackgroundColor3 = themes.preset.background,
                         Visible = false,
@@ -1051,6 +1279,10 @@
             -- 
             
             function cfg.open_tab() 
+                if library.current_element_open then
+                    library.current_element_open.set_visible(false)
+                    library.current_element_open.open = false
+                end
                 local selected_tab = self.selected_tab
                 
                 if selected_tab then 
@@ -1077,7 +1309,14 @@
             return setmetatable(cfg, library)    
         end 
 
-        local notifications = {notifs = {}} 
+        local notifications = {
+            notifs = {},
+            position = {
+                corner = "Top Right",
+                x = 16,
+                y = 16,
+            },
+        } 
         library.notifications = notifications
 
         library.sgui = library:create("ScreenGui", {
@@ -1087,16 +1326,33 @@
             ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         })
 
-        function notifications:refresh_notifs(instant) 
-            local position = vec2(50, 50)
-            if library.main_outline and library.main_outline.Parent then
-                position = vec2(
-                    library.main_outline.AbsolutePosition.X + library.main_outline.AbsoluteSize.X - 4,
-                    library.main_outline.AbsolutePosition.Y + 48
-                )
+        function notifications:set_position(corner, x, y)
+            local valid = {
+                ["Top Left"] = true,
+                ["Top Right"] = true,
+                ["Bottom Left"] = true,
+                ["Bottom Right"] = true,
+            }
+            if valid[corner] then
+                self.position.corner = corner
             end
+            self.position.x = clamp(tonumber(x) or self.position.x, 0, 500)
+            self.position.y = clamp(tonumber(y) or self.position.y, 0, 500)
+            self:refresh_notifs()
+        end
+
+        function notifications:refresh_notifs(instant) 
+            local viewport = camera and camera.ViewportSize or vec2(1920, 1080)
+            local corner = notifications.position.corner
+            local right = string.find(corner, "Right", 1, true) ~= nil
+            local bottom = string.find(corner, "Bottom", 1, true) ~= nil
+            local x = right and (viewport.X - notifications.position.x) or notifications.position.x
+            local base_y = bottom and (viewport.Y - notifications.position.y) or notifications.position.y
+
             for i, v in notifications.notifs do 
-                local target = dim_offset(position.X, position.Y + ((i - 1) * 28))
+                v.AnchorPoint = vec2(right and 1 or 0, bottom and 1 or 0)
+                local y = base_y + ((bottom and -1 or 1) * (i - 1) * 28)
+                local target = dim_offset(x, y)
                 if instant then
                     v.Position = target
                 else
@@ -1105,6 +1361,12 @@
                     }):Play()
                 end
             end
+        end
+
+        if camera then
+            library:connection(camera:GetPropertyChangedSignal("ViewportSize"), function()
+                notifications:refresh_notifs(true)
+            end)
         end
         
         function notifications:fade(path, is_fading)
@@ -1140,6 +1402,7 @@
         end 
         
         function notifications:create_notification(options)
+            options = options or {}
             local cfg = {
                 name = options.name or "Hit: q3sm (finobe) in the Head for 100 Damage!",
                 duration = options.duration or 3,
@@ -1161,9 +1424,9 @@
                 local dark = library:create("Frame", {
                     Parent = outline;
                     BackgroundTransparency = 1;
-                    Position = dim2(0, 2, 0, 2);
+                    Position = dim2(0, 1, 0, 1);
                     BorderColor3 = rgb(0, 0, 0);
-                    Size = dim2(1, -4, 1, -4);
+                    Size = dim2(1, -2, 1, -2);
                     BorderSizePixel = 0;
                     BackgroundColor3 = rgb(0, 0, 0)
                 });
@@ -1236,7 +1499,7 @@
         
         function library:watermark(options)
             local cfg = {
-                name = options.name or "nebulahax";
+                name = options.name or "Fyntra";
             }
             
             -- Instances
@@ -1253,9 +1516,9 @@
                 local dark = library:create("Frame", {
                     Parent = outline;
                     BackgroundTransparency = 0;
-                    Position = dim2(0, 2, 0, 2);
+                    Position = dim2(0, 1, 0, 1);
                     BorderColor3 = rgb(0, 0, 0);
-                    Size = dim2(1, -4, 1, -4);
+                    Size = dim2(1, -2, 1, -2);
                     BorderSizePixel = 0;
                     BackgroundColor3 = themes.preset.background
                 });
@@ -1297,7 +1560,7 @@
             return setmetatable(cfg, library)
         end 
 
-        local watermark = library:watermark({name = "priv9 - 100 fps - 100 ping"})
+        local watermark = library:watermark({name = "Fyntra - 100 fps - 100 ping"})
         local fps = 0
         local watermark_delay = tick() 
 
@@ -1307,7 +1570,7 @@
             if tick() - watermark_delay > 1 then 
                 watermark_delay = tick()
                 local ping = math.floor(stats.PerformanceStats.Ping:GetValue()) .. "ms"                
-                watermark.update_text(string.format("priv9 - fps: %s - ping: %s", fps, ping))
+                watermark.update_text(string.format("Fyntra - fps: %s - ping: %s", fps, ping))
                 fps = 0
             end
         end)
@@ -1376,10 +1639,11 @@
                 local dark = library:create("Frame", {
                     Parent = accent;
                     BackgroundTransparency = 0;
-                    Position = dim2(0, 2, 0, 16);
+                    Position = dim2(0, 1, 0, 16);
                     BorderColor3 = rgb(0, 0, 0);
-                    Size = dim2(1, -4, 1, -18);
+                    Size = dim2(1, -2, 0, 0);
                     BorderSizePixel = 0;
+                    AutomaticSize = Enum.AutomaticSize.Y;
                     BackgroundColor3 = themes.preset.background
                 });
                 
@@ -1405,6 +1669,8 @@
                     })
                 else 
                     accent.Size = dim2(1, 0, cfg.size, 0);
+                    dark.AutomaticSize = Enum.AutomaticSize.None
+                    dark.Size = dim2(1, -2, 1, -17)
                 end
                 
                 library:create("UIListLayout", {
@@ -1543,14 +1809,16 @@
                     insert(library.theme_callbacks, function()
                         if fill and fill.Parent then
                             fill.BackgroundColor3 = cfg.enabled and themes.preset[tostring(self.count)] or themes.preset.inline
+                            label.TextColor3 = cfg.enabled and rgb(255, 255, 255) or themes.preset.text
                         end
                     end)
 
                     config_flags[cfg.flag] = cfg.set
                     cfg.instance = toggle
                     cfg._colorpicker_count = 0
+                    cfg.attachments = {}
 
-                    function cfg.colorpicker(color_options)
+                    function cfg:colorpicker(color_options)
                         color_options = table.clone(color_options or {})
                         cfg._colorpicker_count += 1
                         color_options.parent = toggle
@@ -1559,20 +1827,32 @@
                         color_options.element_size = dim2(0, 12, 0, 12)
                         color_options.element_position = dim2(1, -16 - ((cfg._colorpicker_count - 1) * 15), 0, 0)
                         color_options.swatch_size = dim2(1, 0, 1, 0)
-                        return library:colorpicker(color_options)
+                        local picker = library:colorpicker(color_options)
+                        insert(cfg.attachments, picker)
+                        return picker
                     end
 
-                    library:hover(label, function()
-                        return {TextColor3 = cfg.enabled and rgb(255, 255, 255) or themes.preset.text}
-                    end, function()
-                        return {TextColor3 = rgb(255, 255, 255)}
-                    end)
                 -- 
 
                 -- Connections
                     toggle.MouseButton1Click:Connect(function()
+                        for _, attachment in cfg.attachments do
+                            if attachment.instance and library:mouse_in_frame(attachment.instance) then
+                                return
+                            end
+                        end
                         cfg.enabled = not cfg.enabled 
                         cfg.set(cfg.enabled)
+                    end)
+                    toggle.MouseEnter:Connect(function()
+                        library:tween(label, {TextColor3 = rgb(255, 255, 255)})
+                        if not cfg.enabled then
+                            library:tween(fill, {BackgroundColor3 = themes.preset.surface})
+                        end
+                    end)
+                    toggle.MouseLeave:Connect(function()
+                        library:tween(label, {TextColor3 = cfg.enabled and rgb(255, 255, 255) or themes.preset.text})
+                        library:tween(fill, {BackgroundColor3 = cfg.enabled and themes.preset[tostring(self.count)] or themes.preset.inline})
                     end)
                 -- 
 
@@ -1743,6 +2023,15 @@
                     dragging = false,
                 } 
 
+                cfg.min = tonumber(cfg.min) or 0
+                cfg.max = tonumber(cfg.max) or 100
+                if cfg.min > cfg.max then
+                    cfg.min, cfg.max = cfg.max, cfg.min
+                end
+                cfg.intervals = max(tonumber(cfg.intervals) or 1, 0.000001)
+                cfg.default = clamp(tonumber(cfg.default) or cfg.min, cfg.min, cfg.max)
+                cfg.value = cfg.default
+
                 -- Instances 
                     local slider = library:create("Frame", {
                         Parent = self.elements;
@@ -1811,10 +2100,14 @@
 
                         local range = cfg.max - cfg.min
                         local target_size = dim2(range == 0 and 1 or (cfg.value - cfg.min) / range, 0, 1, 0)
-                        if immediate or cfg.dragging then
+                        if cfg.fill_tween then
+                            cfg.fill_tween:Cancel()
+                            cfg.fill_tween = nil
+                        end
+                        if immediate then
                             accent.Size = target_size
                         else
-                            library:tween(accent, {Size = target_size}, 0.12, Enum.EasingStyle.Quad)
+                            cfg.fill_tween = library:tween(accent, {Size = target_size}, 0.1, Enum.EasingStyle.Quad)
                         end
                         eeeee.Text = cfg.name ..  "<font color='#AAAAAA'>" .. ' - ' .. tostring(cfg.value) .. cfg.suffix .. "</font>"
                         
@@ -1826,10 +2119,19 @@
                 -- 
 
                 -- Connections
-                    outline.MouseButton1Down:Connect(function(input)
+                    local function set_from_x(x)
+                        x = tonumber(x) or uis:GetMouseLocation().X
+                        local width = inline.AbsoluteSize.X
+                        if not x or width <= 0 then
+                            return
+                        end
+                        local size_x = clamp((x - inline.AbsolutePosition.X) / width, 0, 1)
+                        cfg.set(((cfg.max - cfg.min) * size_x) + cfg.min)
+                    end
+
+                    outline.MouseButton1Down:Connect(function(x)
                         cfg.dragging = true 
-                        local size_x = (input.Position.X - inline.AbsolutePosition.X) / inline.AbsoluteSize.X
-                        cfg.set(((cfg.max - cfg.min) * size_x) + cfg.min, true)
+                        set_from_x(x)
                     end)
 
                     library:hover(inline, function()
@@ -1840,10 +2142,7 @@
 
                     library:connection(uis.InputChanged, function(input)
                         if cfg.dragging and input.UserInputType == Enum.UserInputType.MouseMovement then 
-                            local size_x = (input.Position.X - inline.AbsolutePosition.X) / inline.AbsoluteSize.X
-                            local value = ((cfg.max - cfg.min) * size_x) + cfg.min
-                            
-                            cfg.set(value)
+                            set_from_x(input.Position.X)
                         end
                     end)
 
@@ -1875,7 +2174,12 @@
                     option_instances = {}, 
                     multi_items = {}, 
                     ignore = options.ignore or false, 
+                    placeholder = tostring(options.placeholder or "None"),
                 }   
+
+                if type(cfg.items) ~= "table" then
+                    cfg.items = {tostring(cfg.items)}
+                end
 
                 cfg.default = options.default or (cfg.multi and {cfg.items[1]}) or cfg.items[1] or "None"
 
@@ -1949,7 +2253,7 @@
                     -- Holder
                         local accent = library:create("Frame", {
                             Parent = library.popup_layer or library.gui;
-                            Size = dim2(0, 0, 0, 20);
+                            Size = dim2(0, 0, 0, 0);
                             Position = dim2(0, 500, 0, 100);
                             BorderColor3 = rgb(0, 0, 0);
                             BorderSizePixel = 0;
@@ -1957,10 +2261,11 @@
                             AutomaticSize = Enum.AutomaticSize.Y;
                             BackgroundColor3 = themes.preset.outline
                         });	library:apply_theme(accent, "outline", "BackgroundColor3")
+                        accent:SetAttribute("PopupWidthMode", "Anchor")
 
                         local inline = library:create("Frame", {
                             Parent = accent;
-                            Size = dim2(1, -2, 1, -2);
+                            Size = dim2(1, -2, 0, 0);
                             Position = dim2(0, 1, 0, 1);
                             BorderColor3 = rgb(0, 0, 0);
                             BorderSizePixel = 0;
@@ -2001,15 +2306,24 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Text = text;
                             Parent = inline;
-                            Size = dim2(1, 0, 0, 0);
+                            Size = dim2(1, 0, 0, 14);
                             Position = dim2(0, 0, 0, 1);
                             BackgroundTransparency = 1;
                             TextXAlignment = Enum.TextXAlignment.Left;
                             BorderSizePixel = 0;
-                            AutomaticSize = Enum.AutomaticSize.Y;
+                            AutomaticSize = Enum.AutomaticSize.None;
                             TextSize = 12;
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
+
+                        title.MouseEnter:Connect(function()
+                            library:tween(title, {TextColor3 = themes.preset.accent}, 0.1)
+                        end)
+                        title.MouseLeave:Connect(function()
+                            local current = flags[cfg.flag]
+                            local selected = title.Text == current or (type(current) == "table" and find(current, title.Text))
+                            library:tween(title, {TextColor3 = selected and rgb(255, 255, 255) or themes.preset.text}, 0.1)
+                        end)
 
                         return title
                     end 
@@ -2024,13 +2338,8 @@
                         accent.Visible = bool
                         if bool then
                             library:raise_popup(accent)
-                            library:position_popup(accent, dropdown_holder)
-                            task.defer(function()
-                                if accent.Visible then
-                                    library:position_popup(accent, dropdown_holder)
-                                end
-                            end)
                         end
+                        library:follow_popup(cfg, accent, dropdown_holder, bool)
                     end
                     
                     function cfg.set(value)
@@ -2051,7 +2360,7 @@
                             end
                         end
 
-                        text.Text = if isTable then concat(selected, ", ") else selected[1]
+                        text.Text = (if isTable then concat(selected, ", ") else selected[1]) or cfg.placeholder
 
                         flags[cfg.flag] = if isTable then selected else selected[1]
                         
@@ -2059,6 +2368,8 @@
                     end
                     
                     function cfg.refresh_options(list) 
+                        list = type(list) == "table" and list or {}
+                        cfg.items = list
                         for _, option in next, cfg.option_instances do 
                             option:Destroy() 
                         end
@@ -2070,7 +2381,7 @@
 
                             insert(cfg.option_instances, button)
                             
-                            button.MouseButton1Down:Connect(function()
+                            button.MouseButton1Click:Connect(function()
                                 if cfg.multi then 
                                     local selected_index = find(cfg.multi_items, button.Text)
         
@@ -2120,12 +2431,16 @@
                     name = options.name or "Color", 
                     flag = options.flag or options.name or "Flag",
 
-                    color = options.color or color(1, 1, 1), -- Default to white color if not provided
-                    alpha = options.alpha and 1 - options.alpha or 0,
+                    color = typeof(options.color) == "Color3" and options.color or color(1, 1, 1),
+                    alpha = 0,
                     
                     open = false, 
                     callback = options.callback or function() end,
                 }
+                local initial_alpha = tonumber(options.alpha)
+                if initial_alpha ~= nil then
+                    cfg.alpha = clamp(1 - initial_alpha, 0, 1)
+                end
 
                 -- Instances
                     -- Element
@@ -2191,6 +2506,8 @@
                             BorderSizePixel = 0;
                             BackgroundColor3 = themes.preset.outline
                         });	library:apply_theme(colorpicker, "outline", "BackgroundColor3")
+                        colorpicker:SetAttribute("PopupWidthMode", "Fixed")
+                        colorpicker:SetAttribute("PopupFixedWidth", 150)
 
                         local a = library:create("Frame", {
                             Parent = colorpicker;
@@ -2210,19 +2527,11 @@
                             BackgroundTransparency = 0;
                         }); 
 
-                        local _ = library:create("UIPadding", {
-                            PaddingTop = dim(0, 7);
-                            PaddingBottom = dim(0, -13);
-                            Parent = e;
-                            PaddingRight = dim(0, 6);
-                            PaddingLeft = dim(0, 7)
-                        });
-                        
                         local textbox_holder = library:create("Frame", {
                             Parent = e;
-                            Position = dim2(0, 0, 1, -36);
+                            Position = dim2(0, 7, 0, 123);
                             BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(1, -1, 0, 16);
+                            Size = dim2(1, -14, 0, 16);
                             BorderSizePixel = 0;
                             BackgroundColor3 = themes.preset.outline
                         }); library:apply_theme(textbox_holder, "outline", "BackgroundColor3")
@@ -2249,9 +2558,9 @@
                             Text = "";
                             AutoButtonColor = false;
                             Parent = e;
-                            Position = dim2(1, -1, 0, 0);
+                            Position = dim2(1, -7, 0, 7);
                             BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(0, 14, 1, -60);
+                            Size = dim2(0, 14, 0, 88);
                             BorderSizePixel = 0;
                             BackgroundColor3 = themes.preset.inline
                         }); library:apply_theme(hue_button, "inline", "BackgroundColor3")
@@ -2275,19 +2584,20 @@
                             Parent = hue_drag;
                             BorderMode = Enum.BorderMode.Inset;
                             BorderColor3 = rgb(0, 0, 0);
+                            BorderSizePixel = 0;
                             Size = dim2(1, 2, 0, 3);
                             Position = dim2(0, -1, 0, -1);
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
                         
                         local alpha_button = library:create("TextButton", {
-                            AnchorPoint = vec2(0, 0.5);
+                            AnchorPoint = vec2(0, 0);
                             Text = "";
                             AutoButtonColor = false;
                             Parent = e;
-                            Position = dim2(0, 0, 1, -48);
+                            Position = dim2(0, 7, 0, 102);
                             BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(1, -1, 0, 14);
+                            Size = dim2(1, -14, 0, 14);
                             BorderSizePixel = 0;
                             BackgroundColor3 = themes.preset.inline
                         }); library:apply_theme(alpha_button, "inline", "BackgroundColor3")
@@ -2322,6 +2632,7 @@
                             Parent = alpha_color;
                             BorderMode = Enum.BorderMode.Inset;
                             BorderColor3 = rgb(0, 0, 0);
+                            BorderSizePixel = 0;
                             Size = dim2(0, 3, 1, 2);
                             Position = dim2(0, -1, 0, -1);
                             BackgroundColor3 = rgb(255, 255, 255)
@@ -2329,8 +2640,9 @@
                         
                         local saturation_value_button = library:create("TextButton", {
                             Parent = e;
+                            Position = dim2(0, 7, 0, 7);
                             BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(1, -20, 1, -60);
+                            Size = dim2(1, -34, 0, 88);
                             Text = "";
                             AutoButtonColor = false;
                             BorderSizePixel = 0;
@@ -2423,22 +2735,17 @@
                         colorpicker.Visible = bool
                         if bool then
                             library:raise_popup(colorpicker)
-                            library:position_popup(colorpicker, colorpicker_element)
-                            task.defer(function()
-                                if colorpicker.Visible then
-                                    library:position_popup(colorpicker, colorpicker_element)
-                                end
-                            end)
                         end
+                        library:follow_popup(cfg, colorpicker, colorpicker_element, bool)
                     end
 
                     function cfg.set(color, alpha)
-                        if color then
+                        if typeof(color) == "Color3" then
                             h, s, v = color:ToHSV()
                         end
                         
-                        if alpha ~= nil then 
-                            a = alpha
+                        if tonumber(alpha) ~= nil then 
+                            a = clamp(tonumber(alpha), 0, 1)
                         end 
                         
                         local Color = Color3.fromHSV(h, s, v)
@@ -2466,22 +2773,32 @@
                     end
         
                     function cfg.update_color(position)
-                        local offset = position or uis:GetMouseLocation()
+                        local position_type = typeof(position)
+                        local offset = (position_type == "Vector2" or position_type == "Vector3") and position or uis:GetMouseLocation()
                         offset = vec2(offset.X, offset.Y)
 
                         if dragging_sat then	
-                            s = math.clamp((offset - saturation_value_button.AbsolutePosition).X / saturation_value_button.AbsoluteSize.X, 0, 1)
-                            v = 1 - math.clamp((offset - saturation_value_button.AbsolutePosition).Y / saturation_value_button.AbsoluteSize.Y, 0, 1)
+                            local size = saturation_value_button.AbsoluteSize
+                            if size.X <= 0 or size.Y <= 0 then return end
+                            s = math.clamp((offset - saturation_value_button.AbsolutePosition).X / size.X, 0, 1)
+                            v = 1 - math.clamp((offset - saturation_value_button.AbsolutePosition).Y / size.Y, 0, 1)
                         elseif dragging_hue then
-                            h = 1 - math.clamp((offset - hue_button.AbsolutePosition).Y / hue_button.AbsoluteSize.Y, 0, 1)
+                            local height = hue_button.AbsoluteSize.Y
+                            if height <= 0 then return end
+                            h = 1 - math.clamp((offset - hue_button.AbsolutePosition).Y / height, 0, 1)
                         elseif dragging_alpha then
-                            a = 1 - math.clamp((offset - alpha_button.AbsolutePosition).X / alpha_button.AbsoluteSize.X, 0, 1)
+                            local width = alpha_button.AbsoluteSize.X
+                            if width <= 0 then return end
+                            a = 1 - math.clamp((offset - alpha_button.AbsolutePosition).X / width, 0, 1)
                         end
 
                         cfg.set(nil, nil)
                     end
 
                     cfg.set(cfg.color, cfg.alpha)
+                    cfg.instance = colorpicker_element
+                    cfg.swatch = accent
+                    cfg.popup = colorpicker
                     
                     config_flags[cfg.flag] = cfg.set
                 -- 
@@ -2513,19 +2830,24 @@
                         return {BackgroundColor3 = themes.preset.surface}
                     end)
 
-                    alpha_button.MouseButton1Down:Connect(function(input)
+                    local function click_position(x, y)
+                        local mouse_position = uis:GetMouseLocation()
+                        return vec2(tonumber(x) or mouse_position.X, tonumber(y) or mouse_position.Y)
+                    end
+
+                    alpha_button.MouseButton1Down:Connect(function(x, y)
                         dragging_alpha = true 
-                        cfg.update_color(input.Position)
+                        cfg.update_color(click_position(x, y))
                     end)
                     
-                    hue_button.MouseButton1Down:Connect(function(input)
+                    hue_button.MouseButton1Down:Connect(function(x, y)
                         dragging_hue = true 
-                        cfg.update_color(input.Position)
+                        cfg.update_color(click_position(x, y))
                     end)
                     
-                    saturation_button.MouseButton1Down:Connect(function(input)
+                    saturation_button.MouseButton1Down:Connect(function(x, y)
                         dragging_sat = true  
-                        cfg.update_color(input.Position)
+                        cfg.update_color(click_position(x, y))
                     end)
                     
                     textbox.FocusLost:Connect(function()
@@ -2706,17 +3028,18 @@
                         local accent = library:create("Frame", {
                             Parent = library.popup_layer or library.gui;
                             Visible = false;
-                            Size = dim2(0, 0, 0, 20);
+                            Size = dim2(0, 0, 0, 0);
                             Position = dim2(0, 500, 0, 100);
                             BorderColor3 = rgb(0, 0, 0);
                             BorderSizePixel = 0;
                             AutomaticSize = Enum.AutomaticSize.Y;
                             BackgroundColor3 = themes.preset.outline
                         });	library:apply_theme(accent, "outline", "BackgroundColor3")
+                        accent:SetAttribute("PopupWidthMode", "Anchor")
 
                         local inline = library:create("Frame", {
                             Parent = accent;
-                            Size = dim2(1, -2, 1, -2);
+                            Size = dim2(1, -2, 0, 0);
                             Position = dim2(0, 1, 0, 1);
                             BorderColor3 = rgb(0, 0, 0);
                             BorderSizePixel = 0;
@@ -2759,10 +3082,18 @@
                                 BackgroundTransparency = 1;
                                 TextXAlignment = Enum.TextXAlignment.Left;
                                 BorderSizePixel = 0;
-                                AutomaticSize = Enum.AutomaticSize.XY;
+                                Size = dim2(1, 0, 0, 14);
+                                AutomaticSize = Enum.AutomaticSize.None;
                                 TextSize = 12;
                                 BackgroundColor3 = rgb(255, 255, 255)
                             }); cfg.hold_instances[v] = option
+
+                            option.MouseEnter:Connect(function()
+                                library:tween(option, {TextColor3 = themes.preset.accent}, 0.1)
+                            end)
+                            option.MouseLeave:Connect(function()
+                                library:tween(option, {TextColor3 = cfg.mode == v and rgb(255, 255, 255) or themes.preset.text}, 0.1)
+                            end)
 
                             option.MouseButton1Click:Connect(function()
                                 cfg.set(v)
@@ -2865,13 +3196,8 @@
                         accent.Visible = bool
                         if bool then
                             library:raise_popup(accent)
-                            library:position_popup(accent, keybind_holder)
-                            task.defer(function()
-                                if accent.Visible then
-                                    library:position_popup(accent, keybind_holder)
-                                end
-                            end)
                         end
+                        library:follow_popup(cfg, accent, keybind_holder, bool)
                     end
                 -- 
 
@@ -2879,6 +3205,11 @@
                     keybind_holder.MouseButton1Down:Connect(function()
                         task.wait()
                         text.Text = "..."	
+
+                        if cfg.binding then
+                            cfg.binding:Disconnect()
+                            cfg.binding = nil
+                        end
 
                         cfg.binding = library:connection(uis.InputBegan, function(keycode, game_event)
                             local selected_key = keycode.UserInputType == Enum.UserInputType.Keyboard and keycode.KeyCode or keycode.UserInputType
@@ -3088,47 +3419,103 @@
             end 
 
             function library:init_config(window) 
-                local textbox;
-                local main = window:tab({name = "Configs"})
-                local section = main:column({}):section({name = "Settings", size = 1, default = true})
-                config_holder = section:dropdown({name = "Configs", options = {"Report", "This", "Error", "To", "Finobe"}, callback = function(option) if textbox then textbox.set(option) end end, flag = "config_name_list"}); library:update_config_list()
-                textbox = section:textbox({name = "Config name:", flag = "config_name_text"})
-                section:button({name = "Save", callback = function() writefile(library.directory .. "/configs/" .. flags["config_name_text"] .. ".cfg", library:get_config()) library:update_config_list() end}) 
-                section:button({name = "Load", callback = function() library:load_config(readfile(library.directory .. "/configs/" .. flags["config_name_text"] .. ".cfg"))  library:update_config_list() end})
-                section:button({name = "Delete", callback = function() delfile(library.directory .. "/configs/" .. flags["config_name_text"] .. ".cfg")  library:update_config_list() end})
+                if library.config_initialized then
+                    return
+                end
+                library.config_initialized = true
 
-                local section = main:column({}):section({name = "Other", size = 1, default = true})
-                section:keybind({name = "Menu bind", callback = function(bool) window.toggle_menu(bool) end, default = true})
-                section:separator({name = "Theme"})
+                local main = window:tab({name = "Settings"})
+                local config_section = main:column({}):section({name = "Config manager"})
+                local config_textbox
+                config_holder = config_section:dropdown({
+                    name = "Configs",
+                    options = {},
+                    placeholder = "Select config",
+                    callback = function(option)
+                        if config_textbox and option then config_textbox.set(option) end
+                    end,
+                    flag = "manager_config_list",
+                })
+                config_textbox = config_section:textbox({name = "Config name", flag = "manager_config_name", placeholder = "example"})
+                config_section:button({name = "Save config", callback = function()
+                    library:save_config(flags.manager_config_name)
+                    library:update_config_list()
+                end})
+                config_section:button({name = "Load config", callback = function()
+                    library:load_config_file(flags.manager_config_name)
+                end})
+                config_section:button({name = "Delete config", callback = function()
+                    library:delete_config(flags.manager_config_name)
+                    library:update_config_list()
+                end})
+                config_section:button({name = "Set config autoload", callback = function()
+                    library:set_autoload("config", flags.manager_config_name)
+                end})
+                config_section:button({name = "Clear config autoload", callback = function()
+                    library:clear_autoload("config")
+                end})
+                config_section:separator({name = "Menu"})
+                config_section:keybind({name = "Menu bind", flag = "menu_bind", callback = function(bool) window.toggle_menu(bool) end, default = true})
+                config_section:label({name = "fyntra/examplegame/configs", color = themes.preset.muted})
 
+                local theme_section = main:column({}):section({name = "Theme manager"})
                 local theme_pickers = {}
-                section:dropdown({
+                local theme_textbox
+
+                local function sync_theme_pickers()
+                    local palette = library:get_theme()
+                    for key, picker in theme_pickers do
+                        if palette[key] then picker.set(palette[key]) end
+                    end
+                end
+
+                theme_section:dropdown({
                     name = "Preset",
-                    items = {"Default", "Graphite", "Midnight"},
-                    default = "Default",
-                    flag = "menu_theme_preset",
+                    items = {"Fyntra", "Obsidian", "Ember", "Orchid", "Verdant", "Arctic"},
+                    default = "Fyntra",
+                    flag = "manager_theme_preset",
                     callback = function(name)
-                        local palette = library.themes[name]
-                        if not palette then
-                            return
-                        end
-                        library:load_theme(palette)
-                        for key, picker in theme_pickers do
-                            if palette[key] then
-                                picker.set(palette[key])
-                            end
+                        if library.themes[name] then
+                            library:load_theme(name)
+                            sync_theme_pickers()
                         end
                     end,
                 })
 
+                theme_holder = theme_section:dropdown({
+                    name = "Saved themes",
+                    options = {},
+                    placeholder = "Select theme",
+                    flag = "manager_theme_list",
+                    callback = function(option)
+                        if theme_textbox and option then theme_textbox.set(option) end
+                    end,
+                })
+                theme_textbox = theme_section:textbox({name = "Theme name", flag = "manager_theme_name", placeholder = "custom"})
+                theme_section:button({name = "Save theme", callback = function()
+                    library:save_theme(flags.manager_theme_name)
+                    library:update_theme_list()
+                end})
+                theme_section:button({name = "Load theme", callback = function()
+                    if library:load_theme_file(flags.manager_theme_name) then sync_theme_pickers() end
+                end})
+                theme_section:button({name = "Delete theme", callback = function()
+                    library:delete_theme(flags.manager_theme_name)
+                    library:update_theme_list()
+                end})
+                theme_section:button({name = "Set theme autoload", callback = function()
+                    library:set_autoload("theme", flags.manager_theme_name)
+                end})
+                theme_section:button({name = "Clear theme autoload", callback = function()
+                    library:clear_autoload("theme")
+                end})
+
                 local function add_theme_color(name, key)
-                    theme_pickers[key] = section:colorpicker({
+                    theme_pickers[key] = theme_section:colorpicker({
                         name = name,
-                        flag = "menu_theme_" .. key,
+                        flag = "manager_theme_" .. key,
                         color = themes.preset[key],
-                        callback = function(value)
-                            library:update_theme(key, value)
-                        end,
+                        callback = function(value) library:update_theme(key, value) end,
                     })
                 end
 
@@ -3141,6 +3528,22 @@
                 add_theme_color("Text", "text")
                 add_theme_color("Muted text", "muted")
                 add_theme_color("Text outline", "text_outline")
+                theme_section:label({name = "fyntra/examplegame/theme", color = themes.preset.muted})
+
+                for _, flag in {
+                    "manager_config_list", "manager_config_name", "manager_theme_preset", "manager_theme_list", "manager_theme_name",
+                    "manager_theme_accent", "manager_theme_background", "manager_theme_panel", "manager_theme_surface",
+                    "manager_theme_inline", "manager_theme_outline", "manager_theme_text", "manager_theme_muted", "manager_theme_text_outline",
+                } do
+                    library.ignored_config_flags[flag] = true
+                end
+
+                library:update_config_list()
+                library:update_theme_list()
+                task.defer(function()
+                    library:load_autoloads()
+                    sync_theme_pickers()
+                end)
             end
         -- 
     -- 
