@@ -87,6 +87,7 @@
             accent = hex("#245771"),
             outline = rgb(10, 10, 10),
             inline = rgb(35, 35, 35),
+            panel = rgb(24, 24, 24),
             text = rgb(180, 180, 180),
             text_outline = rgb(0, 0, 0),
             background = rgb(20, 20, 20),
@@ -108,6 +109,9 @@
             },
             inline = {
                 BackgroundColor3 = {} 	
+            },
+            panel = {
+                BackgroundColor3 = {},
             },
             text = {
                 TextColor3 = {}	
@@ -157,6 +161,7 @@
             accent = hex("#4E718A"),
             outline = rgb(8, 8, 8),
             inline = rgb(36, 36, 36),
+            panel = rgb(27, 27, 27),
             background = rgb(18, 18, 18),
             surface = rgb(29, 29, 29),
             text = rgb(190, 190, 190),
@@ -167,6 +172,7 @@
             accent = hex("#385C88"),
             outline = rgb(6, 8, 12),
             inline = rgb(25, 29, 36),
+            panel = rgb(20, 23, 29),
             background = rgb(14, 17, 22),
             surface = rgb(31, 36, 44),
             text = rgb(198, 204, 214),
@@ -625,7 +631,7 @@
         end
 
         function library:raise_popup(popup, base_zindex)
-            base_zindex = base_zindex or 50
+            base_zindex = base_zindex or 20
             popup.ZIndex = base_zindex
             for _, descendant in popup:GetDescendants() do
                 if descendant:IsA("GuiObject") then
@@ -642,10 +648,6 @@
             local x = clamp(anchor.AbsolutePosition.X, 2, max(2, viewport.X - width - 2))
             local below = anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + gap
             local y = below
-
-            if below + height > viewport.Y - 2 then
-                y = max(2, anchor.AbsolutePosition.Y - height - gap)
-            end
 
             popup.Size = dim2(0, width, popup.Size.Y.Scale, popup.Size.Y.Offset)
             popup.Position = dim_offset(floor(x + 0.5), floor(y + 0.5))
@@ -721,7 +723,7 @@
                 ins[prop] = value
             end
 
-            for _, theme_name in {"accent", "outline", "inline", "background", "surface", "text", "muted", "text_outline"} do
+            for _, theme_name in {"accent", "outline", "inline", "panel", "background", "surface", "text", "muted", "text_outline"} do
                 for property in themes.utility[theme_name] do
                     if options[property] ~= nil and options[property] == themes.preset[theme_name] then
                         library:apply_theme(ins, theme_name, property)
@@ -807,15 +809,15 @@
                 cfg.resize_handle = resize_handle
                 
                 local title_holder = library:create("Frame", {
-                    AnchorPoint = vec2(0, 1);
                     Parent = window_outline;
                     BackgroundTransparency = 0;
-                    Position = dim2(0, 2, 1, -2);
+                    Position = dim2(0, 2, 0, 2);
                     BorderColor3 = rgb(0, 0, 0);
                     Size = dim2(1, -4, 0, 20);
                     BorderSizePixel = 0;
                     BackgroundColor3 = themes.preset.background;
                     Active = true;
+                    ZIndex = 40;
                 });
                 
                 local ui_title = library:create("TextLabel", {
@@ -830,7 +832,8 @@
                     TextXAlignment = Enum.TextXAlignment.Left;
                     BorderSizePixel = 0;
                     TextSize = 12;
-                    BackgroundColor3 = rgb(255, 255, 255)
+                    BackgroundColor3 = rgb(255, 255, 255);
+                    ZIndex = 41
                 });
 
                 local minimize = library:create("TextButton", {
@@ -845,6 +848,7 @@
                     Text = "-";
                     TextSize = 12;
                     TextColor3 = themes.preset.text;
+                    ZIndex = 42;
                 })
 
                 library:hover(minimize, function()
@@ -857,11 +861,12 @@
                 local tab_button_holder = library:create("Frame", {
                     Parent = window_outline;
                     BackgroundTransparency = 0;
-                    Position = dim2(0, 2, 0, 2);
+                    Position = dim2(0, 2, 0, 24);
                     BorderColor3 = rgb(0, 0, 0);
                     Size = dim2(1, -4, 0, 20);
                     BorderSizePixel = 0;
-                    BackgroundColor3 = themes.preset.background
+                    BackgroundColor3 = themes.preset.background;
+                    ZIndex = 35
                 }); cfg.tab_button_holder = tab_button_holder
                 
                 library:create("UIListLayout", {
@@ -973,9 +978,9 @@
                     local Page = library:create("Frame", {
                         Parent = self.main_outline;
                         BackgroundTransparency = 0;
-                        Position = dim2(0, 2, 0, 24);
+                        Position = dim2(0, 2, 0, 46);
                         BorderColor3 = rgb(0, 0, 0);
-                        Size = dim2(1, -4, 1, -48);
+                        Size = dim2(1, -4, 1, -70);
                         BorderSizePixel = 0;
                         BackgroundColor3 = themes.preset.background,
                         Visible = false,
@@ -1304,8 +1309,8 @@
                     ClipsDescendants = true;
                     BorderColor3 = rgb(0, 0, 0);
                     BorderSizePixel = 0;
-                    BackgroundColor3 = themes.preset[tostring(self.count)]
-                }); library:apply_theme(accent, tostring(self.count), "BackgroundColor3");
+                    BackgroundColor3 = themes.preset.panel
+                }); library:apply_theme(accent, "panel", "BackgroundColor3");
 
                 local dark = library:create("Frame", {
                     Parent = accent;
@@ -1519,8 +1524,8 @@
                         Size = dim2(1, 0, 0, cfg.scale);
                         BorderSizePixel = 0;
                         AutomaticSize = Enum.AutomaticSize.Y;
-                        BackgroundColor3 = themes.preset.outline
-                    }); library:apply_theme(accent, "outline", "BackgroundColor3")
+                        BackgroundColor3 = themes.preset.panel
+                    }); library:apply_theme(accent, "panel", "BackgroundColor3")
                     accent.Visible = cfg.visible
                     
                     local inline = library:create("Frame", {
@@ -3019,6 +3024,7 @@
 
                 add_theme_color("Accent", "accent")
                 add_theme_color("Background", "background")
+                add_theme_color("Panel", "panel")
                 add_theme_color("Surface", "surface")
                 add_theme_color("Inline", "inline")
                 add_theme_color("Outline", "outline")
