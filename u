@@ -959,7 +959,8 @@
                         BorderSizePixel = 0;
                         AutomaticSize = Enum.AutomaticSize.XY;
                         TextSize = 12;
-                        BackgroundColor3 = rgb(255, 255, 255)
+                        BackgroundColor3 = rgb(255, 255, 255);
+                        ZIndex = 36
                     });
 
                     tab_button.MouseEnter:Connect(function()
@@ -980,7 +981,7 @@
                         BackgroundTransparency = 0;
                         Position = dim2(0, 2, 0, 46);
                         BorderColor3 = rgb(0, 0, 0);
-                        Size = dim2(1, -4, 1, -70);
+                        Size = dim2(1, -4, 1, -48);
                         BorderSizePixel = 0;
                         BackgroundColor3 = themes.preset.background,
                         Visible = false,
@@ -1927,6 +1928,7 @@
                         end
                         accent.Visible = bool
                         if bool then
+                            library:raise_popup(accent)
                             library:position_popup(accent, dropdown_holder)
                             task.defer(function()
                                 if accent.Visible then
@@ -2002,7 +2004,7 @@
                 -- 
 
                 -- Connections 
-                    dropdown_holder.MouseButton1Click:Connect(function()
+                    dropdown_holder.MouseButton1Down:Connect(function()
                         cfg.open = not cfg.open 
                         cfg.set_visible(cfg.open)
                     end)
@@ -2321,6 +2323,7 @@
                         end
                         colorpicker.Visible = bool
                         if bool then
+                            library:raise_popup(colorpicker)
                             library:position_popup(colorpicker, colorpicker_element_color)
                             task.defer(function()
                                 if colorpicker.Visible then
@@ -2385,7 +2388,7 @@
                 -- 
                 
                 -- Connections 
-                    colorpicker_element.MouseButton1Click:Connect(function()
+                    colorpicker_element.MouseButton1Down:Connect(function()
                         cfg.open = not cfg.open 
 
                         cfg.set_visible(cfg.open)            
@@ -2755,6 +2758,7 @@
                         end
                         accent.Visible = bool
                         if bool then
+                            library:raise_popup(accent)
                             library:position_popup(accent, keybind_holder)
                             task.defer(function()
                                 if accent.Visible then
