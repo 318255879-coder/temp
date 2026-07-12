@@ -76,6 +76,7 @@ local DEFAULTS = {
     chams_outline_transparency = 0.1,
     gradient = true,
     gradient_rotation = 0,
+    update_rate = 60,
 }
 
 local BODY_PART_NAMES = {
@@ -153,6 +154,12 @@ local function setGuiVisible(objects, visible)
         if object and object.Parent and object:IsA("GuiObject") then
             object.Visible = visible
         end
+    end
+end
+
+local function setProperty(object, property, value)
+    if object[property] ~= value then
+        object[property] = value
     end
 end
 
@@ -290,7 +297,7 @@ local function projectModel(model, padding, parts)
     local projected_points = 0
 
     for _, part in parts do
-        if not part.Parent or not isRenderableBodyPart(part, model) then
+        if not part.Parent or part.Transparency >= 0.95 then
             continue
         end
         local half = part.Size * 0.5
@@ -347,8 +354,12 @@ function Visuals.new(options)
     }
     self.animated_gradients = options.animated_gradients or false
     self.gradient_speed = options.gradient_speed or 35
+    self.update_rate = math.max(1, options.update_rate or self.options.update_rate)
+    self.update_interval = 1 / self.update_rate
+    self.update_accumulator = 0
     self.flags = nil
     self.flag_map = nil
+    self.flag_values = {}
 
     self.gui = create("ScreenGui", {
         Parent = getParent(options.parent),
@@ -364,7 +375,12 @@ function Visuals.new(options)
     end
 
     self.connections.render = RunService.RenderStepped:Connect(function(delta)
-        self:_step(delta)
+        self.update_accumulator += delta
+        if self.update_accumulator >= self.update_interval then
+            local elapsed = self.update_accumulator
+            self.update_accumulator = 0
+            self:_step(elapsed)
+        end
     end)
     self.connections.camera = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
         Camera = Workspace.CurrentCamera
@@ -606,7 +622,8 @@ function Visuals:_syncFlags()
     end
     for option, flag in self.flag_map do
         local value = self.flags[flag]
-        if value ~= nil then
+        if value ~= nil and self.flag_values[flag] ~= value then
+            self.flag_values[flag] = value
             if option == "enabled" then
                 self.enabled = value
             else
@@ -629,6 +646,13 @@ function Visuals:SetEnabled(value)
     return self
 end
 
+function Visuals:SetUpdateRate(rate)
+    self.update_rate = math.max(1, tonumber(rate) or 60)
+    self.update_interval = 1 / self.update_rate
+    self.update_accumulator = 0
+    return self
+end
+
 function Visuals:SetOptions(options)
     for key, value in options or {} do
         self.options[key] = value
@@ -639,8 +663,11 @@ function Visuals:SetOptions(options)
     return self
 end
 
-function Visuals:SetGradient(colors, transparency)
+function Visuals:SetGradient(colors, transparency, from_theme)
     self.gradient_colors = colors
+    if not from_theme then
+        self.custom_gradient = true
+    end
     local sequence = colorSequence(colors)
     for index = #self.gradients, 1, -1 do
         local record = self.gradients[index]
@@ -684,7 +711,9 @@ function Visuals:SetTheme(theme)
     for key, value in theme or {} do
         self.theme[key] = value
     end
-    self:SetGradient({self.theme["1"], self.theme["2"], self.theme["3"]})
+    if not self.custom_gradient then
+        self:SetGradient({self.theme["1"], self.theme["2"], self.theme["3"]}, nil, true)
+    end
     for _, entity in self.entities do
         entity:_applyTheme()
     end
@@ -804,6 +833,10 @@ function Entity:SetHealthGradient(colors, transparency)
 end
 
 function Entity:SetVisible(value)
+    value = not not value
+    if self.visible == value then
+        return
+    end
     setGuiVisible(self.objects, value)
     if self.objects.highlight then
         self.objects.highlight.Enabled = value and self.options.chams
@@ -836,6 +869,12 @@ function Entity:_update()
         return
     end
 
+    local root_point, root_on_screen = Camera:WorldToViewportPoint(root.Position)
+    if root_point.Z <= 0.5 or not root_on_screen then
+        self:SetVisible(false)
+        return
+    end
+
     local distance = (Camera.CFrame.Position - root.Position).Magnitude
     if distance > options.max_distance then
         self:SetVisible(false)
@@ -860,37 +899,37 @@ function Entity:_update()
     local center_x = top_left.X + width * 0.5
 
     self:SetVisible(true)
-    objects.fill.Visible = options.box and options.box_fill
-    objects.fill.Position = fromOffset(top_left.X + thickness, top_left.Y + thickness)
-    objects.fill.Size = fromOffset(max(0, width - thickness * 2), max(0, height - thickness * 2))
+    setProperty(objects.fill, "Visible", options.box and options.box_fill)
+    setProperty(objects.fill, "Position", fromOffset(top_left.X + thickness, top_left.Y + thickness))
+    setProperty(objects.fill, "Size", fromOffset(max(0, width - thickness * 2), max(0, height - thickness * 2)))
 
     local box_visible = options.box
     for _, key in {"top", "bottom", "left", "right", "top_shadow", "bottom_shadow", "left_shadow", "right_shadow"} do
-        objects[key].Visible = box_visible
+        setProperty(objects[key], "Visible", box_visible)
     end
 
-    objects.top_shadow.Position = fromOffset(top_left.X - 1, top_left.Y - 1)
-    objects.top_shadow.Size = fromOffset(width + 2, shadow_thickness)
-    objects.bottom_shadow.Position = fromOffset(top_left.X - 1, bottom_right.Y - thickness - 1)
-    objects.bottom_shadow.Size = fromOffset(width + 2, shadow_thickness)
-    objects.left_shadow.Position = fromOffset(top_left.X - 1, top_left.Y - 1)
-    objects.left_shadow.Size = fromOffset(shadow_thickness, height + 2)
-    objects.right_shadow.Position = fromOffset(bottom_right.X - thickness - 1, top_left.Y - 1)
-    objects.right_shadow.Size = fromOffset(shadow_thickness, height + 2)
+    setProperty(objects.top_shadow, "Position", fromOffset(top_left.X - 1, top_left.Y - 1))
+    setProperty(objects.top_shadow, "Size", fromOffset(width + 2, shadow_thickness))
+    setProperty(objects.bottom_shadow, "Position", fromOffset(top_left.X - 1, bottom_right.Y - thickness - 1))
+    setProperty(objects.bottom_shadow, "Size", fromOffset(width + 2, shadow_thickness))
+    setProperty(objects.left_shadow, "Position", fromOffset(top_left.X - 1, top_left.Y - 1))
+    setProperty(objects.left_shadow, "Size", fromOffset(shadow_thickness, height + 2))
+    setProperty(objects.right_shadow, "Position", fromOffset(bottom_right.X - thickness - 1, top_left.Y - 1))
+    setProperty(objects.right_shadow, "Size", fromOffset(shadow_thickness, height + 2))
 
-    objects.top.Position = fromOffset(top_left.X, top_left.Y)
-    objects.top.Size = fromOffset(width, thickness)
-    objects.bottom.Position = fromOffset(top_left.X, bottom_right.Y - thickness)
-    objects.bottom.Size = fromOffset(width, thickness)
-    objects.left.Position = fromOffset(top_left.X, top_left.Y)
-    objects.left.Size = fromOffset(thickness, height)
-    objects.right.Position = fromOffset(bottom_right.X - thickness, top_left.Y)
-    objects.right.Size = fromOffset(thickness, height)
+    setProperty(objects.top, "Position", fromOffset(top_left.X, top_left.Y))
+    setProperty(objects.top, "Size", fromOffset(width, thickness))
+    setProperty(objects.bottom, "Position", fromOffset(top_left.X, bottom_right.Y - thickness))
+    setProperty(objects.bottom, "Size", fromOffset(width, thickness))
+    setProperty(objects.left, "Position", fromOffset(top_left.X, top_left.Y))
+    setProperty(objects.left, "Size", fromOffset(thickness, height))
+    setProperty(objects.right, "Position", fromOffset(bottom_right.X - thickness, top_left.Y))
+    setProperty(objects.right, "Size", fromOffset(thickness, height))
 
-    objects.name.Visible = options.name
-    objects.name.Text = options.display_name or (self.player and self.player.DisplayName) or model.Name
-    objects.name.Position = fromOffset(top_left.X - 20, top_left.Y - 14)
-    objects.name.Size = fromOffset(width + 40, 12)
+    setProperty(objects.name, "Visible", options.name)
+    setProperty(objects.name, "Text", options.display_name or (self.player and self.player.DisplayName) or model.Name)
+    setProperty(objects.name, "Position", fromOffset(top_left.X - 20, top_left.Y - 14))
+    setProperty(objects.name, "Size", fromOffset(width + 40, 12))
 
     local health = humanoid and humanoid.Health or options.health or 100
     local max_health = humanoid and humanoid.MaxHealth or options.max_health or 100
@@ -900,37 +939,37 @@ function Entity:_update()
     local health_x = top_left.X - health_width - 4
     local empty_height = floor(height * (1 - health_ratio) + 0.5)
     local filled_height = max(0, height - empty_height)
-    objects.health_outline.Visible = health_visible
-    objects.health_background.Visible = health_visible
-    objects.health_clip.Visible = health_visible
-    objects.health_fill.Visible = health_visible
-    objects.health_outline.Position = fromOffset(health_x - 1, top_left.Y - 1)
-    objects.health_outline.Size = fromOffset(health_width + 2, height + 2)
-    objects.health_background.Position = fromOffset(health_x, top_left.Y)
-    objects.health_background.Size = fromOffset(health_width, height)
-    objects.health_clip.Position = fromOffset(health_x, top_left.Y + empty_height)
-    objects.health_clip.Size = fromOffset(health_width, filled_height)
-    objects.health_fill.Position = fromOffset(0, -empty_height)
-    objects.health_fill.Size = fromOffset(health_width, height)
+    setProperty(objects.health_outline, "Visible", health_visible)
+    setProperty(objects.health_background, "Visible", health_visible)
+    setProperty(objects.health_clip, "Visible", health_visible)
+    setProperty(objects.health_fill, "Visible", health_visible)
+    setProperty(objects.health_outline, "Position", fromOffset(health_x - 1, top_left.Y - 1))
+    setProperty(objects.health_outline, "Size", fromOffset(health_width + 2, height + 2))
+    setProperty(objects.health_background, "Position", fromOffset(health_x, top_left.Y))
+    setProperty(objects.health_background, "Size", fromOffset(health_width, height))
+    setProperty(objects.health_clip, "Position", fromOffset(health_x, top_left.Y + empty_height))
+    setProperty(objects.health_clip, "Size", fromOffset(health_width, filled_height))
+    setProperty(objects.health_fill, "Position", fromOffset(0, -empty_height))
+    setProperty(objects.health_fill, "Size", fromOffset(health_width, height))
 
-    objects.health_text.Visible = health_visible and options.health_text and health_ratio < 0.995
-    objects.health_text.Text = tostring(floor(health + 0.5))
-    objects.health_text.Position = fromOffset(health_x - 38, top_left.Y + empty_height - 6)
-    objects.health_text.Size = fromOffset(35, 11)
+    setProperty(objects.health_text, "Visible", health_visible and options.health_text and health_ratio < 0.995)
+    setProperty(objects.health_text, "Text", tostring(floor(health + 0.5)))
+    setProperty(objects.health_text, "Position", fromOffset(health_x - 38, top_left.Y + empty_height - 6))
+    setProperty(objects.health_text, "Size", fromOffset(35, 11))
 
-    objects.distance.Visible = options.distance
-    objects.distance.Text = string.format("[%d%s]", floor(distance + 0.5), options.distance_unit)
-    objects.distance.Position = fromOffset(top_left.X - 20, bottom_right.Y + 1)
-    objects.distance.Size = fromOffset(width + 40, 11)
+    setProperty(objects.distance, "Visible", options.distance)
+    setProperty(objects.distance, "Text", string.format("[%d%s]", floor(distance + 0.5), options.distance_unit))
+    setProperty(objects.distance, "Position", fromOffset(top_left.X - 20, bottom_right.Y + 1))
+    setProperty(objects.distance, "Size", fromOffset(width + 40, 11))
 
     local tool_name = getToolName(model)
-    objects.tool.Visible = options.tool and tool_name ~= ""
-    objects.tool.Text = tool_name
-    objects.tool.Position = fromOffset(top_left.X - 20, bottom_right.Y + (options.distance and 12 or 1))
-    objects.tool.Size = fromOffset(width + 40, 11)
+    setProperty(objects.tool, "Visible", options.tool and tool_name ~= "")
+    setProperty(objects.tool, "Text", tool_name)
+    setProperty(objects.tool, "Position", fromOffset(top_left.X - 20, bottom_right.Y + (options.distance and 12 or 1)))
+    setProperty(objects.tool, "Size", fromOffset(width + 40, 11))
 
-    objects.tracer.Visible = options.tracer
-    objects.tracer_shadow.Visible = options.tracer
+    setProperty(objects.tracer, "Visible", options.tracer)
+    setProperty(objects.tracer_shadow, "Visible", options.tracer)
     if options.tracer then
         local viewport = Camera.ViewportSize
         local origin
@@ -948,8 +987,12 @@ function Entity:_update()
         setLine(objects.tracer, origin, destination, thickness)
     end
 
-    objects.highlight.Adornee = model
-    objects.highlight.Enabled = options.chams
+    if objects.highlight.Adornee ~= model then
+        objects.highlight.Adornee = model
+    end
+    if objects.highlight.Enabled ~= options.chams then
+        objects.highlight.Enabled = options.chams
+    end
 end
 
 function Entity:Destroy()
