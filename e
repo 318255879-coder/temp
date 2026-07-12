@@ -1,5 +1,5 @@
 --[[
-    priv9 visual library
+    Fyntra visual library
 
     local Visuals = loadstring(...)()
     local esp = Visuals.new()
@@ -45,9 +45,9 @@ local DEFAULT_THEME = {
     text_outline = rgb(0, 0, 0),
     background = rgb(20, 20, 20),
     muted = rgb(145, 145, 145),
-    ["1"] = Color3.fromHex("#245771"),
-    ["2"] = Color3.fromHex("#215D63"),
-    ["3"] = Color3.fromHex("#1E6453"),
+    ["1"] = Color3.fromHex("#8B6CFF"),
+    ["2"] = Color3.fromHex("#5CC8FF"),
+    ["3"] = Color3.fromHex("#5FE1A1"),
 }
 
 local DEFAULTS = {
@@ -62,6 +62,9 @@ local DEFAULTS = {
     box_fill_transparency = 0.92,
     name = true,
     name_gradient = true,
+    health_text_gradient = true,
+    distance_gradient = true,
+    tool_gradient = true,
     name_size = 11,
     text_size = 11,
     healthbar = true,
@@ -77,6 +80,36 @@ local DEFAULTS = {
     gradient = true,
     gradient_rotation = 0,
 }
+
+local BOOLEAN_OPTIONS = {
+    enabled = true, team_check = true, box = true, box_fill = true, name = true,
+    name_gradient = true, healthbar = true, health_text = true, health_text_gradient = true,
+    distance = true, distance_gradient = true, tool = true, tool_gradient = true,
+    tracer = true, chams = true, gradient = true,
+}
+
+local NUMBER_OPTIONS = {
+    max_distance = true, box_thickness = true, box_padding = true, box_fill_transparency = true,
+    name_size = true, text_size = true, health_width = true, chams_fill_transparency = true,
+    chams_outline_transparency = true, gradient_rotation = true,
+}
+
+local function sanitizeOption(key, value, fallback)
+    if BOOLEAN_OPTIONS[key] then
+        return type(value) == "boolean" and value or fallback
+    elseif NUMBER_OPTIONS[key] then
+        local number = tonumber(value) or fallback
+        if string.find(key, "transparency", 1, true) then
+            return clamp(number or 0, 0, 1)
+        elseif key == "name_size" or key == "text_size" or key == "health_width" or key == "box_thickness" then
+            return max(1, number or 1)
+        elseif key == "max_distance" then
+            return max(0, number or 0)
+        end
+        return number
+    end
+    return value
+end
 
 local BODY_PART_NAMES = {
     Head = true,
@@ -125,20 +158,64 @@ local function create(class_name, properties)
     return object
 end
 
-local function colorSequence(colors)
+local function normalizeColors(colors, fallback)
     if typeof(colors) == "ColorSequence" then
-        return colors
+        local list = {}
+        for _, point in colors.Keypoints do
+            insert(list, point.Value)
+        end
+        return list
     elseif typeof(colors) == "Color3" then
-        return ColorSequence.new(colors)
+        return {colors, colors}
     end
 
-    local list = colors or {DEFAULT_THEME["1"], DEFAULT_THEME["2"], DEFAULT_THEME["3"]}
+    local list = {}
+    if type(colors) == "table" then
+        for _, value in colors do
+            if typeof(value) == "Color3" then
+                insert(list, value)
+            end
+        end
+    end
+    if #list == 0 then
+        local fallback_type = typeof(fallback)
+        if fallback_type == "ColorSequence" then
+            for _, point in fallback.Keypoints do insert(list, point.Value) end
+        elseif fallback_type == "Color3" then
+            insert(list, fallback)
+        elseif type(fallback) == "table" then
+            for _, value in fallback do
+                if typeof(value) == "Color3" then insert(list, value) end
+            end
+        else
+            list = {DEFAULT_THEME["1"], DEFAULT_THEME["2"], DEFAULT_THEME["3"]}
+        end
+    end
+    if #list == 0 then
+        list = {rgb(255, 255, 255), rgb(255, 255, 255)}
+    elseif #list == 1 then
+        insert(list, list[1])
+    end
+    return list
+end
+
+local function colorSequence(colors, fallback)
+    if typeof(colors) == "ColorSequence" then
+        return colors
+    end
+    local list = normalizeColors(colors, fallback)
     local points = {}
     local denominator = max(#list - 1, 1)
     for index, value in list do
         insert(points, ColorSequenceKeypoint.new((index - 1) / denominator, value))
     end
     return ColorSequence.new(points)
+end
+
+local function numberSequence(value)
+    if typeof(value) == "NumberSequence" then return value end
+    local number = tonumber(value)
+    return number ~= nil and NumberSequence.new(clamp(number, 0, 1)) or nil
 end
 
 local function setLine(frame, origin, destination, thickness)
@@ -176,8 +253,16 @@ local function getFontSet()
     end
 
     local ok, loaded = pcall(function()
-        local directory = "priv9_visuals"
+        local root = "fyntra"
+        local game_directory = root .. "/examplegame"
+        local directory = game_directory .. "/visuals"
         local font_directory = directory .. "/fonts"
+        if type(isfolder) ~= "function" or not isfolder(root) then
+            makefolder(root)
+        end
+        if type(isfolder) ~= "function" or not isfolder(game_directory) then
+            makefolder(game_directory)
+        end
         if type(isfolder) ~= "function" or not isfolder(directory) then
             makefolder(directory)
         end
@@ -205,13 +290,13 @@ local function getFontSet()
         end
 
         local tiny = register(
-            "Priv9VisualTiny",
+            "FyntraVisualTiny",
             "tahoma_bold.ttf",
             "https://github.com/i77lhm/storage/raw/refs/heads/main/fonts/tahoma_bold.ttf"
         )
         return {
             ProggyClean = register(
-                "Priv9VisualProggyClean",
+                "FyntraVisualProggyClean",
                 "ProggyClean.ttf",
                 "https://github.com/i77lhm/storage/raw/refs/heads/main/fonts/ProggyClean.ttf"
             ),
@@ -337,20 +422,31 @@ local function projectModel(model, padding, parts)
 end
 
 function Visuals.new(options)
-    options = options or {}
+    options = type(options) == "table" and options or {}
     local self = setmetatable({}, Visuals)
     self.fonts = getFontSet()
-    self.theme = merge(getTheme(), options.theme)
-    self.options = merge(DEFAULTS, options.defaults)
+    self.theme = merge(getTheme(), type(options.theme) == "table" and options.theme or nil)
+    for key, fallback in DEFAULT_THEME do
+        if typeof(self.theme[key]) ~= "Color3" then self.theme[key] = fallback end
+    end
+    self.options = merge(DEFAULTS, type(options.defaults) == "table" and options.defaults or nil)
+    for key, value in self.options do
+        self.options[key] = sanitizeOption(key, value, DEFAULTS[key])
+    end
     self.enabled = options.enabled ~= false
     self.entities = {}
     self.connections = {}
     self.gradients = {}
-    self.gradient_colors = options.gradient_colors or {
+    self.gradient_colors = normalizeColors(options.gradient_colors, {
         self.theme["1"],
         self.theme["2"],
         self.theme["3"],
-    }
+    })
+    self.text_gradient_colors = {}
+    for _, key in {"name", "health_text", "distance", "tool"} do
+        local supplied = type(options.text_gradient_colors) == "table" and options.text_gradient_colors[key] or nil
+        self.text_gradient_colors[key] = normalizeColors(supplied, self.gradient_colors)
+    end
     self.animated_gradients = options.animated_gradients or false
     self.gradient_speed = options.gradient_speed or 35
     self.flags = nil
@@ -359,7 +455,7 @@ function Visuals.new(options)
 
     self.gui = create("ScreenGui", {
         Parent = getParent(options.parent),
-        Name = options.name or "priv9_visuals",
+        Name = options.name or "fyntra_visuals",
         DisplayOrder = options.display_order or 0,
         IgnoreGuiInset = true,
         ResetOnSpawn = false,
@@ -380,7 +476,7 @@ function Visuals.new(options)
     return self
 end
 
-function Visuals:_gradient(parent, colors, rotation)
+function Visuals:_gradient(parent, colors, rotation, group)
     local gradient = create("UIGradient", {
         Parent = parent,
         Color = colorSequence(colors or self.gradient_colors),
@@ -390,6 +486,7 @@ function Visuals:_gradient(parent, colors, rotation)
         object = gradient,
         linked = colors == nil,
         base_rotation = rotation or 0,
+        group = group or (colors == nil and "box" or "custom"),
     })
     return gradient
 end
@@ -421,7 +518,7 @@ function Visuals:_side(rotation)
         BackgroundColor3 = rgb(255, 255, 255),
         ZIndex = 4,
     })
-    local gradient = self:_gradient(side, nil, rotation)
+    local gradient = self:_gradient(side, nil, rotation, "box")
     return shadow, side, gradient
 end
 
@@ -435,7 +532,10 @@ function Visuals:Add(target, options)
     entity.library = self
     entity.target = target
     entity.player = getTargetPlayer(target)
-    entity.options = merge(self.options, options)
+    entity.options = merge(self.options, type(options) == "table" and options or nil)
+    for key, value in entity.options do
+        entity.options[key] = sanitizeOption(key, value, self.options[key] or DEFAULTS[key])
+    end
     entity.objects = {}
     entity.gradients = {}
     entity.destroyed = false
@@ -461,7 +561,8 @@ function Visuals:Add(target, options)
         TextSize = entity.options.name_size,
         TextXAlignment = Enum.TextXAlignment.Center,
     })
-    entity.gradients.name = self:_gradient(objects.name, nil, gradient_rotation)
+    objects.name.TextColor3 = rgb(255, 255, 255)
+    entity.gradients.name = self:_gradient(objects.name, self.text_gradient_colors.name, gradient_rotation, "name")
 
     objects.health_outline = create("Frame", {
         Parent = self.gui,
@@ -497,6 +598,10 @@ function Visuals:Add(target, options)
     objects.health_text = self:_text({Text = "", TextSize = entity.options.text_size, TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 7})
     objects.distance = self:_text({Text = "", TextSize = entity.options.text_size, TextXAlignment = Enum.TextXAlignment.Center})
     objects.tool = self:_text({Text = "", TextSize = entity.options.text_size, TextXAlignment = Enum.TextXAlignment.Center})
+    for _, key in {"health_text", "distance", "tool"} do
+        objects[key].TextColor3 = rgb(255, 255, 255)
+        entity.gradients[key] = self:_gradient(objects[key], self.text_gradient_colors[key], gradient_rotation, key)
+    end
     objects.tracer_shadow = create("Frame", {
         Parent = self.gui,
         AnchorPoint = vec2(0, 0.5),
@@ -511,7 +616,7 @@ function Visuals:Add(target, options)
         BackgroundColor3 = rgb(255, 255, 255),
         ZIndex = 3,
     })
-    entity.gradients.tracer = self:_gradient(objects.tracer, nil, gradient_rotation)
+    entity.gradients.tracer = self:_gradient(objects.tracer, nil, gradient_rotation, "tracer")
 
     objects.highlight = create("Highlight", {
         Parent = self.gui,
@@ -545,7 +650,7 @@ end
 
 function Visuals:TrackPlayers(options)
     self.tracking_players = true
-    self.tracked_options = options or self.tracked_options or {}
+    self.tracked_options = type(options) == "table" and options or self.tracked_options or {}
 
     for _, player in Players:GetPlayers() do
         if player ~= LocalPlayer then
@@ -613,6 +718,7 @@ function Visuals:_syncFlags()
     end
     for option, flag in self.flag_map do
         local value = self.flags[flag]
+        value = sanitizeOption(option, value, self.options[option])
         if value ~= nil and self.flag_values[flag] ~= value then
             self.flag_values[flag] = value
             if option == "enabled" then
@@ -638,8 +744,9 @@ function Visuals:SetEnabled(value)
 end
 
 function Visuals:SetOptions(options)
-    for key, value in options or {} do
-        self.options[key] = value
+    if type(options) ~= "table" then return self end
+    for key, value in options do
+        self.options[key] = sanitizeOption(key, value, self.options[key])
     end
     for _, entity in self.entities do
         entity:SetOptions(options)
@@ -648,11 +755,11 @@ function Visuals:SetOptions(options)
 end
 
 function Visuals:SetGradient(colors, transparency, from_theme)
-    self.gradient_colors = colors
+    self.gradient_colors = normalizeColors(colors, self.gradient_colors)
     if not from_theme then
         self.custom_gradient = true
     end
-    local sequence = colorSequence(colors)
+    local sequence = colorSequence(self.gradient_colors)
     for index = #self.gradients, 1, -1 do
         local record = self.gradients[index]
         if not record.object or not record.object.Parent then
@@ -660,7 +767,8 @@ function Visuals:SetGradient(colors, transparency, from_theme)
         elseif record.linked then
             record.object.Color = sequence
             if transparency ~= nil then
-                record.object.Transparency = typeof(transparency) == "NumberSequence" and transparency or NumberSequence.new(transparency)
+                local sequence_value = numberSequence(transparency)
+                if sequence_value then record.object.Transparency = sequence_value end
             end
         end
     end
@@ -677,12 +785,25 @@ function Visuals:SetGradient(colors, transparency, from_theme)
                 gradient.Enabled = entity.options.gradient ~= false
                 gradient.Color = sequence
                 if transparency ~= nil then
-                    gradient.Transparency = typeof(transparency) == "NumberSequence" and transparency or NumberSequence.new(transparency)
+                    local sequence_value = numberSequence(transparency)
+                    if sequence_value then gradient.Transparency = sequence_value end
                 end
             end
         end
     end
     return self
+end
+
+function Visuals:SetTextGradient(kind, colors, transparency)
+    if not self.text_gradient_colors[kind] then
+        return false
+    end
+    local normalized = normalizeColors(colors, self.text_gradient_colors[kind])
+    self.text_gradient_colors[kind] = normalized
+    for _, entity in self.entities do
+        entity:SetTextGradient(kind, normalized, transparency)
+    end
+    return true
 end
 
 function Visuals:SetAnimatedGradients(value, speed)
@@ -702,6 +823,7 @@ function Visuals:SetAnimatedGradients(value, speed)
 end
 
 function Visuals:SetHealthGradient(colors, transparency)
+    colors = normalizeColors(colors, self.options.health_gradient)
     for _, entity in self.entities do
         entity:SetHealthGradient(colors, transparency)
     end
@@ -710,8 +832,11 @@ function Visuals:SetHealthGradient(colors, transparency)
 end
 
 function Visuals:SetTheme(theme)
-    for key, value in theme or {} do
-        self.theme[key] = value
+    if type(theme) ~= "table" then return self end
+    for key, value in theme do
+        if self.theme[key] ~= nil and typeof(value) == "Color3" then
+            self.theme[key] = value
+        end
     end
     if not self.custom_gradient then
         self:SetGradient({self.theme["1"], self.theme["2"], self.theme["3"]}, nil, true)
@@ -727,7 +852,7 @@ function Visuals:_step(delta)
     if self.animated_gradients then
         self.gradient_rotation = (self.gradient_rotation or 0) + (delta * self.gradient_speed)
         for _, record in self.gradients do
-            if record.linked and record.object and record.object.Parent then
+            if record.group ~= "health" and record.group ~= "custom" and record.object and record.object.Parent then
                 record.object.Rotation = record.base_rotation + self.gradient_rotation
             end
         end
@@ -770,14 +895,16 @@ function Entity:_applyTheme()
         objects[key].BackgroundColor3 = theme.outline
     end
     for _, key in {"name", "health_text", "distance", "tool"} do
-        objects[key].TextColor3 = theme.text
+        local gradient = self.gradients[key]
+        objects[key].TextColor3 = gradient and gradient.Enabled and rgb(255, 255, 255) or theme.text
         objects[key].TextStrokeColor3 = theme.text_outline
     end
 end
 
 function Entity:SetOptions(options)
-    for key, value in options or {} do
-        self.options[key] = value
+    if type(options) ~= "table" then options = {} end
+    for key, value in options do
+        self.options[key] = sanitizeOption(key, value, self.options[key])
     end
     self.objects.fill.BackgroundTransparency = self.options.box_fill_transparency
     self.objects.highlight.FillTransparency = self.options.chams_fill_transparency
@@ -791,6 +918,14 @@ function Entity:SetOptions(options)
     end
     if self.gradients.name then
         self.gradients.name.Enabled = self.options.name_gradient
+        self.objects.name.TextColor3 = self.gradients.name.Enabled and rgb(255, 255, 255) or self.library.theme.text
+    end
+    for _, key in {"health_text", "distance", "tool"} do
+        local gradient = self.gradients[key]
+        if gradient then
+            gradient.Enabled = self.options[key .. "_gradient"] ~= false
+            self.objects[key].TextColor3 = gradient.Enabled and rgb(255, 255, 255) or self.library.theme.text
+        end
     end
     self.objects.name.TextSize = self.options.name_size
     for _, key in {"health_text", "distance", "tool"} do
@@ -811,7 +946,8 @@ function Entity:SetGradient(colors, transparency)
         if gradient and gradient.Parent and key ~= "health" then
             gradient.Color = sequence
             if transparency ~= nil then
-                gradient.Transparency = typeof(transparency) == "NumberSequence" and transparency or NumberSequence.new(transparency)
+                local sequence_value = numberSequence(transparency)
+                if sequence_value then gradient.Transparency = sequence_value end
             end
             for _, record in self.library.gradients do
                 if record.object == gradient then
@@ -824,11 +960,29 @@ function Entity:SetGradient(colors, transparency)
     return self
 end
 
+function Entity:SetTextGradient(kind, colors, transparency)
+    local gradient = self.gradients[kind]
+    if not gradient or not gradient.Parent then
+        return false
+    end
+    gradient.Color = colorSequence(colors, self.library.text_gradient_colors[kind])
+    if transparency ~= nil then
+        local sequence_value = numberSequence(transparency)
+        if sequence_value then gradient.Transparency = sequence_value end
+    end
+    local enabled_key = kind == "name" and "name_gradient" or (kind .. "_gradient")
+    gradient.Enabled = self.options[enabled_key] ~= false
+    self.objects[kind].TextColor3 = gradient.Enabled and rgb(255, 255, 255) or self.library.theme.text
+    return true
+end
+
 function Entity:SetHealthGradient(colors, transparency)
     local gradient = self.gradients.health
+    if not gradient or not gradient.Parent then return false end
     gradient.Color = colorSequence(colors)
     if transparency ~= nil then
-        gradient.Transparency = typeof(transparency) == "NumberSequence" and transparency or NumberSequence.new(transparency)
+        local sequence_value = numberSequence(transparency)
+        if sequence_value then gradient.Transparency = sequence_value end
     end
     self.options.health_gradient = colors
     return self
@@ -853,6 +1007,10 @@ function Entity:_update()
 
     local library = self.library
     local options = self.options
+    local max_distance = max(0, tonumber(options.max_distance) or DEFAULTS.max_distance)
+    local box_padding = tonumber(options.box_padding) or DEFAULTS.box_padding
+    local box_thickness = tonumber(options.box_thickness) or DEFAULTS.box_thickness
+    local health_width_option = tonumber(options.health_width) or DEFAULTS.health_width
     local model = getTargetModel(self.target)
     local humanoid = model and model:FindFirstChildOfClass("Humanoid")
     local root = model and (model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart)
@@ -878,15 +1036,15 @@ function Entity:_update()
     end
 
     local distance = (Camera.CFrame.Position - root.Position).Magnitude
-    if distance > options.max_distance then
+    if distance > max_distance then
         self:SetVisible(false)
         return
     end
 
-    local top_left, bottom_right = projectModel(model, options.box_padding, self.body_parts)
+    local top_left, bottom_right = projectModel(model, box_padding, self.body_parts)
     if not top_left then
         self.body_parts = getRenderableBodyParts(model)
-        top_left, bottom_right = projectModel(model, options.box_padding, self.body_parts)
+        top_left, bottom_right = projectModel(model, box_padding, self.body_parts)
     end
     if not top_left then
         self:SetVisible(false)
@@ -896,7 +1054,7 @@ function Entity:_update()
     local objects = self.objects
     local width = bottom_right.X - top_left.X
     local height = bottom_right.Y - top_left.Y
-    local thickness = max(1, floor(options.box_thickness + 0.5))
+    local thickness = max(1, floor(box_thickness + 0.5))
     local shadow_thickness = thickness + 2
     local center_x = top_left.X + width * 0.5
 
@@ -937,7 +1095,7 @@ function Entity:_update()
     local max_health = humanoid and humanoid.MaxHealth or options.max_health or 100
     local health_ratio = clamp(max_health > 0 and health / max_health or 0, 0, 1)
     local health_visible = options.healthbar and humanoid ~= nil
-    local health_width = max(2, floor(options.health_width + 0.5))
+    local health_width = max(2, floor(health_width_option + 0.5))
     local health_x = top_left.X - health_width - 4
     local empty_height = floor(height * (1 - health_ratio) + 0.5)
     local filled_height = max(0, height - empty_height)
