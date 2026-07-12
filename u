@@ -368,6 +368,9 @@
                         )
                     )
                     frame.Size = current_size
+                    if library.notifications then
+                        library.notifications:refresh_notifs(true)
+                    end
                 end
             end)
 
@@ -429,6 +432,9 @@
                     )
 
                     frame.Position = current_position
+                    if library.notifications and frame == library.main_outline then
+                        library.notifications:refresh_notifs(true)
+                    end
                 end
             end)
         end 
@@ -631,7 +637,7 @@
         end
 
         function library:raise_popup(popup, base_zindex)
-            base_zindex = base_zindex or 100
+            base_zindex = base_zindex or 300
             popup.ZIndex = base_zindex
             for _, descendant in popup:GetDescendants() do
                 if descendant:IsA("GuiObject") then
@@ -646,12 +652,13 @@
         end
 
         function library:position_popup(popup, anchor, gap)
-            gap = gap or 2
+            gap = gap or 0
             local width = max(anchor.AbsoluteSize.X, popup.AbsoluteSize.X)
+            local x = anchor.AbsolutePosition.X + (anchor.AbsoluteSize.X - width) * 0.5
 
             popup.Size = dim2(0, width, popup.Size.Y.Scale, popup.Size.Y.Offset)
             popup.Position = dim_offset(
-                floor(anchor.AbsolutePosition.X + 0.5),
+                floor(x + 0.5),
                 floor(anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + gap + 0.5)
             )
         end
@@ -782,6 +789,19 @@
                 IgnoreGuiInset = true,
             })
 
+            -- Popups live in screen space instead of inside the scaled window tree.
+            -- This keeps their hitboxes and absolute positions identical to their triggers.
+            library.popup_layer = library:create("Frame", {
+                Parent = library.gui,
+                Name = "PopupLayer",
+                Position = dim2(0, 0, 0, 0),
+                Size = dim2(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Active = false,
+                ZIndex = 299,
+            })
+
             library:connection(uis.InputBegan, function(input, game_event)
                 if game_event or input.UserInputType ~= Enum.UserInputType.MouseButton1 then
                     return
@@ -813,6 +833,7 @@
                     Active = true;
                 });
                 cfg.main_outline = window_outline
+                library.main_outline = window_outline
 
                 library:create("UIStroke", {
                     Parent = window_outline,
@@ -1057,16 +1078,32 @@
         end 
 
         local notifications = {notifs = {}} 
+        library.notifications = notifications
 
         library.sgui = library:create("ScreenGui", {
             Name = "Hi",
-            Parent = gethui() 
+            Parent = gethui(),
+            IgnoreGuiInset = true,
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         })
 
-        function notifications:refresh_notifs() 
+        function notifications:refresh_notifs(instant) 
+            local position = vec2(50, 50)
+            if library.main_outline and library.main_outline.Parent then
+                position = vec2(
+                    library.main_outline.AbsolutePosition.X + library.main_outline.AbsoluteSize.X - 4,
+                    library.main_outline.AbsolutePosition.Y + 48
+                )
+            end
             for i, v in notifications.notifs do 
-                local Position = vec2(50, 50)
-                tween_service:Create(v, TweenInfo.new(1, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {Position = dim_offset(Position.X, Position.Y + (i * 30))}):Play()
+                local target = dim_offset(position.X, position.Y + ((i - 1) * 28))
+                if instant then
+                    v.Position = target
+                else
+                    tween_service:Create(v, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                        Position = target
+                    }):Play()
+                end
             end
         end
         
@@ -1112,7 +1149,8 @@
             -- Instances
                 local outline = library:create("Frame", {
                     Parent = library.sgui;
-                    Position = dim_offset(-50, 50 + (#notifications.notifs * 30)); -- origin (dependant on the watermark position rn)
+                    AnchorPoint = vec2(1, 0);
+                    Position = dim_offset(50, 50);
                     BorderColor3 = rgb(0, 0, 0);
                     Size = dim2(0, 0, 0, 24);
                     BorderSizePixel = 0;
@@ -1185,7 +1223,6 @@
             end
             
             notifications:refresh_notifs()
-            tween_service:Create(outline, TweenInfo.new(1, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {AnchorPoint = vec2(0, 0)}):Play()
             
             notifications:fade(outline, false)
         
@@ -1510,6 +1547,26 @@
                     end)
 
                     config_flags[cfg.flag] = cfg.set
+                    cfg.instance = toggle
+                    cfg._colorpicker_count = 0
+
+                    function cfg.colorpicker(color_options)
+                        color_options = table.clone(color_options or {})
+                        cfg._colorpicker_count += 1
+                        color_options.parent = toggle
+                        color_options.no_label = true
+                        color_options.element_anchor_point = vec2(1, 0)
+                        color_options.element_size = dim2(0, 12, 0, 12)
+                        color_options.element_position = dim2(1, -16 - ((cfg._colorpicker_count - 1) * 15), 0, 0)
+                        color_options.swatch_size = dim2(1, 0, 1, 0)
+                        return library:colorpicker(color_options)
+                    end
+
+                    library:hover(label, function()
+                        return {TextColor3 = cfg.enabled and rgb(255, 255, 255) or themes.preset.text}
+                    end, function()
+                        return {TextColor3 = rgb(255, 255, 255)}
+                    end)
                 -- 
 
                 -- Connections
@@ -1743,7 +1800,7 @@
                 -- 
                 
                 -- Functions 
-                    function cfg.set(value)
+                    function cfg.set(value, immediate)
                         local valuee = tonumber(value)
 
                         if valuee == nil then 
@@ -1753,7 +1810,12 @@
                         cfg.value = clamp(library:round(valuee, cfg.intervals), cfg.min, cfg.max)
 
                         local range = cfg.max - cfg.min
-                        accent.Size = dim2(range == 0 and 1 or (cfg.value - cfg.min) / range, 0, 1, 0)
+                        local target_size = dim2(range == 0 and 1 or (cfg.value - cfg.min) / range, 0, 1, 0)
+                        if immediate or cfg.dragging then
+                            accent.Size = target_size
+                        else
+                            library:tween(accent, {Size = target_size}, 0.12, Enum.EasingStyle.Quad)
+                        end
                         eeeee.Text = cfg.name ..  "<font color='#AAAAAA'>" .. ' - ' .. tostring(cfg.value) .. cfg.suffix .. "</font>"
                         
                         flags[cfg.flag] = cfg.value
@@ -1761,12 +1823,19 @@
                         cfg.callback(flags[cfg.flag])
                     end 
 
-                    cfg.set(cfg.default)
                 -- 
 
                 -- Connections
-                    outline.MouseButton1Down:Connect(function()
+                    outline.MouseButton1Down:Connect(function(input)
                         cfg.dragging = true 
+                        local size_x = (input.Position.X - inline.AbsolutePosition.X) / inline.AbsoluteSize.X
+                        cfg.set(((cfg.max - cfg.min) * size_x) + cfg.min, true)
+                    end)
+
+                    library:hover(inline, function()
+                        return {BackgroundColor3 = themes.preset.inline}
+                    end, function()
+                        return {BackgroundColor3 = themes.preset.surface}
                     end)
 
                     library:connection(uis.InputChanged, function(input)
@@ -1785,7 +1854,7 @@
                     end)
                 -- 
 
-                cfg.set(cfg.default)
+                cfg.set(cfg.default, true)
 
                 config_flags[cfg.flag] = cfg.set
 
@@ -1852,9 +1921,10 @@
                             Parent = inline;
                             Size = dim2(1, -6, 1, 0);
                             BackgroundTransparency = 1;
-                            Position = dim2(0, 3, 0, 1);
+                            Position = dim2(0, 3, 0, 0);
                             BorderSizePixel = 0;
                             TextTruncate = Enum.TextTruncate.AtEnd;
+                            TextYAlignment = Enum.TextYAlignment.Center;
                             TextSize = 12;
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
@@ -1878,7 +1948,7 @@
 
                     -- Holder
                         local accent = library:create("Frame", {
-                            Parent = library.gui;
+                            Parent = library.popup_layer or library.gui;
                             Size = dim2(0, 0, 0, 20);
                             Position = dim2(0, 500, 0, 100);
                             BorderColor3 = rgb(0, 0, 0);
@@ -2033,12 +2103,19 @@
                         cfg.open = not cfg.open 
                         cfg.set_visible(cfg.open)
                     end)
+
+                    library:hover(inline, function()
+                        return {BackgroundColor3 = themes.preset.inline}
+                    end, function()
+                        return {BackgroundColor3 = themes.preset.surface}
+                    end)
                 -- 
 
                 return setmetatable(cfg, library)
             end 
             
             function library:colorpicker(options) 
+                options = options or {}
                 local cfg = {
                     name = options.name or "Color", 
                     flag = options.flag or options.name or "Flag",
@@ -2053,12 +2130,14 @@
                 -- Instances
                     -- Element
                         local colorpicker_element = library:create("TextButton", {
-                            Parent = self.elements;
+                            Parent = options.parent or self.elements;
+                            AnchorPoint = options.element_anchor_point or vec2(0, 0);
+                            Position = options.element_position or dim2(0, 0, 0, 0);
                             BackgroundTransparency = 1;
                             Text = "";
                             AutoButtonColor = false;
                             BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(1, 0, 0, 12);
+                            Size = options.element_size or dim2(1, 0, 0, 12);
                             BorderSizePixel = 0;
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
@@ -2068,7 +2147,7 @@
                             Parent = colorpicker_element;
                             Position = dim2(1, 0, 0, 0);
                             BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(0, 30, 0, 12);
+                            Size = options.swatch_size or dim2(0, 30, 0, 12);
                             BorderSizePixel = 0;
                             BackgroundColor3 = themes.preset.outline
                         }); library:apply_theme(accent, "outline", "BackgroundColor3")
@@ -2082,28 +2161,30 @@
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
                         
-                        library:create("TextLabel", {
-                            FontFace = fonts["ProggyClean"];
-                            TextColor3 = rgb(255, 255, 255);
-                            BorderColor3 = rgb(0, 0, 0);
-                            Text = cfg.name;
-                            Parent = colorpicker_element;
-                            Size = dim2(1, 0, 1, 0);
-                            Position = dim2(0, 1, 0, 0);
-                            BackgroundTransparency = 1;
-                            TextXAlignment = Enum.TextXAlignment.Left;
-                            BorderSizePixel = 0;
-                            AutomaticSize = Enum.AutomaticSize.X;
-                            TextSize = 12;
-                            BackgroundColor3 = rgb(255, 255, 255)
-                        });
+                        if not options.no_label then
+                            library:create("TextLabel", {
+                                FontFace = fonts["ProggyClean"];
+                                TextColor3 = rgb(255, 255, 255);
+                                BorderColor3 = rgb(0, 0, 0);
+                                Text = cfg.name;
+                                Parent = colorpicker_element;
+                                Size = dim2(1, 0, 1, 0);
+                                Position = dim2(0, 1, 0, 0);
+                                BackgroundTransparency = 1;
+                                TextXAlignment = Enum.TextXAlignment.Left;
+                                BorderSizePixel = 0;
+                                AutomaticSize = Enum.AutomaticSize.X;
+                                TextSize = 12;
+                                BackgroundColor3 = rgb(255, 255, 255)
+                            });
+                        end
                         
                     -- 
                     
                     -- Elements
                         local colorpicker = library:create("Frame", {
-                            Parent = library.gui;
-                            Position = dim2(0.6888179183006287, 0, 0.24751244485378265, 0);
+                            Parent = library.popup_layer or library.gui;
+                            Position = dim_offset(0, 0);
                             BorderColor3 = rgb(0, 0, 0);
                             Visible = false;
                             Size = dim2(0, 150, 0, 150);
@@ -2356,7 +2437,7 @@
                             h, s, v = color:ToHSV()
                         end
                         
-                        if alpha then 
+                        if alpha ~= nil then 
                             a = alpha
                         end 
                         
@@ -2424,6 +2505,12 @@
                             dragging_hue = false
                             dragging_alpha = false  
                         end
+                    end)
+
+                    library:hover(accent, function()
+                        return {BackgroundColor3 = themes.preset.outline}
+                    end, function()
+                        return {BackgroundColor3 = themes.preset.surface}
                     end)
 
                     alpha_button.MouseButton1Down:Connect(function(input)
@@ -2590,9 +2677,10 @@
                             Parent = inline;
                             Size = dim2(1, -6, 1, 0);
                             BackgroundTransparency = 1;
-                            Position = dim2(0, 3, 0, -1);
+                            Position = dim2(0, 3, 0, 0);
                             BorderSizePixel = 0;
                             TextTruncate = Enum.TextTruncate.AtEnd;
+                            TextYAlignment = Enum.TextYAlignment.Center;
                             TextSize = 12;
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
@@ -2616,7 +2704,7 @@
 
                     -- Holder
                         local accent = library:create("Frame", {
-                            Parent = library.gui;
+                            Parent = library.popup_layer or library.gui;
                             Visible = false;
                             Size = dim2(0, 0, 0, 20);
                             Position = dim2(0, 500, 0, 100);
@@ -2805,6 +2893,12 @@
                         cfg.open = not cfg.open 
 
                         cfg.set_visible(cfg.open) 
+                    end)
+
+                    library:hover(inline, function()
+                        return {BackgroundColor3 = themes.preset.inline}
+                    end, function()
+                        return {BackgroundColor3 = themes.preset.surface}
                     end)
 
                     library:connection(uis.InputBegan, function(input, game_event) 
