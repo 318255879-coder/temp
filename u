@@ -84,6 +84,7 @@
     
     local themes = {
         preset = {
+            accent = hex("#245771"),
             outline = rgb(10, 10, 10),
             inline = rgb(35, 35, 35),
             text = rgb(180, 180, 180),
@@ -91,12 +92,20 @@
             background = rgb(20, 20, 20),
             surface = rgb(27, 27, 27),
             muted = rgb(125, 125, 125),
+            -- Legacy aliases kept for old scripts. All fills now use one accent.
             ["1"] = hex("#245771"), 
-            ["2"] = hex("#215D63"),
-            ["3"] = hex("#1E6453"),
+            ["2"] = hex("#245771"),
+            ["3"] = hex("#245771"),
         },
 
         utility = {
+            accent = {
+                BackgroundColor3 = {},
+                TextColor3 = {},
+                ImageColor3 = {},
+                ScrollBarImageColor3 = {},
+                Color = {},
+            },
             inline = {
                 BackgroundColor3 = {} 	
             },
@@ -140,6 +149,30 @@
                 ScrollBarImageColor3 = {} 
             },
         }
+    }
+
+    library.themes = {
+        Default = table.clone(themes.preset),
+        Graphite = {
+            accent = hex("#4E718A"),
+            outline = rgb(8, 8, 8),
+            inline = rgb(36, 36, 36),
+            background = rgb(18, 18, 18),
+            surface = rgb(29, 29, 29),
+            text = rgb(190, 190, 190),
+            muted = rgb(125, 125, 125),
+            text_outline = rgb(0, 0, 0),
+        },
+        Midnight = {
+            accent = hex("#385C88"),
+            outline = rgb(6, 8, 12),
+            inline = rgb(25, 29, 36),
+            background = rgb(14, 17, 22),
+            surface = rgb(31, 36, 44),
+            text = rgb(198, 204, 214),
+            muted = rgb(119, 127, 140),
+            text_outline = rgb(0, 0, 0),
+        },
     }
     
     local keys = {
@@ -271,7 +304,7 @@
         function library:close_current_element(cfg) 
             local path = library.current_element_open
 
-            if path then
+            if path and path ~= cfg then
                 path.set_visible(false)
                 path.open = false 
             end
@@ -336,8 +369,9 @@
         end
 
         function library:mouse_in_frame(uiobject)
-            local y_cond = uiobject.AbsolutePosition.Y <= mouse.Y and mouse.Y <= uiobject.AbsolutePosition.Y + uiobject.AbsoluteSize.Y
-            local x_cond = uiobject.AbsolutePosition.X <= mouse.X and mouse.X <= uiobject.AbsolutePosition.X + uiobject.AbsoluteSize.X
+            local position = uis:GetMouseLocation()
+            local y_cond = uiobject.AbsolutePosition.Y <= position.Y and position.Y <= uiobject.AbsolutePosition.Y + uiobject.AbsoluteSize.Y
+            local x_cond = uiobject.AbsolutePosition.X <= position.X and position.X <= uiobject.AbsolutePosition.X + uiobject.AbsoluteSize.X
 
             return (y_cond and x_cond)
         end
@@ -496,14 +530,18 @@
                 return false
             end
 
-            for property_name, objects in themes.utility[theme] do
-                for _, object in objects do
-                    if object and object.Parent then
-                        object[property_name] = color
+            local targets = theme == "accent" and {"accent", "1", "2", "3"} or {theme}
+            for _, target in targets do
+                for property_name, objects in themes.utility[target] do
+                    for _, object in objects do
+                        if object and object.Parent then
+                            object[property_name] = color
+                        end
                     end
                 end
+                themes.preset[target] = color
             end
-            themes.preset[theme] = color 
+
             library:refresh_gradients()
             for _, callback in library.theme_callbacks do
                 callback(theme, color)
@@ -556,19 +594,61 @@
                     library:update_theme(tostring(key), value)
                 end
             end
+            return library:get_theme()
         end
 
         function library:get_theme()
             return table.clone(themes.preset)
         end
 
+        function library:register_theme(name, values)
+            library.themes[name] = table.clone(values)
+            return library.themes[name]
+        end
+
+        function library:load_theme(theme)
+            local values = type(theme) == "string" and library.themes[theme] or theme
+            if not values then
+                return false
+            end
+            library:set_theme(values)
+            return true
+        end
+
         function library:hover(object, normal_properties, hover_properties)
             object.MouseEnter:Connect(function()
-                library:tween(object, hover_properties)
+                library:tween(object, type(hover_properties) == "function" and hover_properties() or hover_properties)
             end)
             object.MouseLeave:Connect(function()
-                library:tween(object, normal_properties)
+                library:tween(object, type(normal_properties) == "function" and normal_properties() or normal_properties)
             end)
+        end
+
+        function library:raise_popup(popup, base_zindex)
+            base_zindex = base_zindex or 50
+            popup.ZIndex = base_zindex
+            for _, descendant in popup:GetDescendants() do
+                if descendant:IsA("GuiObject") then
+                    descendant.ZIndex = base_zindex + 1
+                end
+            end
+        end
+
+        function library:position_popup(popup, anchor, gap)
+            gap = gap or 2
+            local viewport = camera.ViewportSize
+            local width = max(anchor.AbsoluteSize.X, popup.AbsoluteSize.X)
+            local height = popup.AbsoluteSize.Y
+            local x = clamp(anchor.AbsolutePosition.X, 2, max(2, viewport.X - width - 2))
+            local below = anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + gap
+            local y = below
+
+            if below + height > viewport.Y - 2 then
+                y = max(2, anchor.AbsolutePosition.Y - height - gap)
+            end
+
+            popup.Size = dim2(0, width, popup.Size.Y.Scale, popup.Size.Y.Offset)
+            popup.Position = dim_offset(floor(x + 0.5), floor(y + 0.5))
         end
 
         function library:tooltip(object, text)
@@ -640,6 +720,14 @@
             for prop, value in next, options do 
                 ins[prop] = value
             end
+
+            for _, theme_name in {"accent", "outline", "inline", "background", "surface", "text", "muted", "text_outline"} do
+                for property in themes.utility[theme_name] do
+                    if options[property] ~= nil and options[property] == themes.preset[theme_name] then
+                        library:apply_theme(ins, theme_name, property)
+                    end
+                end
+            end
             
             if instance == "TextLabel" or instance == "TextButton" or instance == "TextBox" then 	
                 library:apply_theme(ins, "text", "TextColor3")
@@ -696,7 +784,7 @@
                     BorderColor3 = rgb(0, 0, 0);
                     Size = cfg.size;
                     BorderSizePixel = 0;
-                    BackgroundColor3 = rgb(255, 255, 255);
+                    BackgroundColor3 = themes.preset.outline;
                     Active = true;
                 });
                 cfg.main_outline = window_outline
@@ -715,16 +803,18 @@
                 cfg.scale_object = scale
 
                 local resize_handle = library:resizify(window_outline, cfg.min_size, cfg.max_size)
+                resize_handle.ZIndex = 25
                 cfg.resize_handle = resize_handle
                 
                 local title_holder = library:create("Frame", {
+                    AnchorPoint = vec2(0, 1);
                     Parent = window_outline;
-                    BackgroundTransparency = 0.800000011920929;
-                    Position = dim2(0, 2, 0, 2);
+                    BackgroundTransparency = 0;
+                    Position = dim2(0, 2, 1, -2);
                     BorderColor3 = rgb(0, 0, 0);
                     Size = dim2(1, -4, 0, 20);
                     BorderSizePixel = 0;
-                    BackgroundColor3 = rgb(0, 0, 0);
+                    BackgroundColor3 = themes.preset.background;
                     Active = true;
                 });
                 
@@ -735,8 +825,9 @@
                     Text = cfg.name;
                     Parent = title_holder;
                     BackgroundTransparency = 1;
-                    Size = dim2(1, -48, 1, 0);
-                    Position = dim2(0, 24, 0, 0);
+                    Size = dim2(1, -30, 1, 0);
+                    Position = dim2(0, 6, 0, 0);
+                    TextXAlignment = Enum.TextXAlignment.Left;
                     BorderSizePixel = 0;
                     TextSize = 12;
                     BackgroundColor3 = rgb(255, 255, 255)
@@ -756,20 +847,21 @@
                     TextColor3 = themes.preset.text;
                 })
 
-                library:hover(minimize, {TextColor3 = themes.preset.text}, {TextColor3 = rgb(255, 255, 255)})
+                library:hover(minimize, function()
+                    return {TextColor3 = themes.preset.text}
+                end, function()
+                    return {TextColor3 = rgb(255, 255, 255)}
+                end)
                 library:draggify(window_outline, title_holder)
                 
-                library.gradient = library:apply_gradient(window_outline)
-                
                 local tab_button_holder = library:create("Frame", {
-                    AnchorPoint = vec2(0, 1);
                     Parent = window_outline;
-                    BackgroundTransparency = 0.800000011920929;
-                    Position = dim2(0, 2, 1, -2);
+                    BackgroundTransparency = 0;
+                    Position = dim2(0, 2, 0, 2);
                     BorderColor3 = rgb(0, 0, 0);
                     Size = dim2(1, -4, 0, 20);
                     BorderSizePixel = 0;
-                    BackgroundColor3 = rgb(0, 0, 0)
+                    BackgroundColor3 = themes.preset.background
                 }); cfg.tab_button_holder = tab_button_holder
                 
                 library:create("UIListLayout", {
@@ -789,6 +881,11 @@
                 end
                 cfg.visible = bool
                 window_outline.Visible = bool
+                if not bool and library.current_element_open then
+                    library.current_element_open.set_visible(false)
+                    library.current_element_open.open = false
+                    library.current_element_open = nil
+                end
             end
 
             function cfg.set_title(text)
@@ -860,16 +957,6 @@
                         BackgroundColor3 = rgb(255, 255, 255)
                     });
 
-                    local indicator = library:create("Frame", {
-                        Parent = tab_button,
-                        AnchorPoint = vec2(0, 1),
-                        Position = dim2(0, 2, 1, 0),
-                        Size = dim2(1, -4, 0, 1),
-                        BorderSizePixel = 0,
-                        BackgroundColor3 = rgb(255, 255, 255),
-                        BackgroundTransparency = 1,
-                    })
-                    library:apply_gradient(indicator)
                     tab_button.MouseEnter:Connect(function()
                         if not self.selected_tab or self.selected_tab[2] ~= tab_button then
                             library:tween(tab_button, {TextColor3 = rgb(225, 225, 225)})
@@ -885,12 +972,12 @@
                 -- Page
                     local Page = library:create("Frame", {
                         Parent = self.main_outline;
-                        BackgroundTransparency = 0.6;
+                        BackgroundTransparency = 0;
                         Position = dim2(0, 2, 0, 24);
                         BorderColor3 = rgb(0, 0, 0);
                         Size = dim2(1, -4, 1, -48);
                         BorderSizePixel = 0;
-                        BackgroundColor3 = rgb(0, 0, 0),
+                        BackgroundColor3 = themes.preset.background,
                         Visible = false,
                     }); cfg.page = Page
                     
@@ -919,16 +1006,14 @@
                 if selected_tab then 
                     selected_tab[1].Visible = false 
                     selected_tab[2].TextColor3 = rgb(170, 170, 170)
-                    selected_tab[3].BackgroundTransparency = 1
 
                     selected_tab = nil 
                 end
 
                 Page.Visible = true
                 tab_button.TextColor3 = rgb(255, 255, 255)
-                indicator.BackgroundTransparency = 0
 
-                self.selected_tab = {Page, tab_button, indicator}
+                self.selected_tab = {Page, tab_button}
             end
 
             tab_button.MouseButton1Down:Connect(function()
@@ -1040,7 +1125,8 @@
                     BackgroundColor3 = rgb(255, 255, 255)
                 }); 
                 
-                library:apply_gradient(outline)
+                outline.BackgroundColor3 = themes.preset.accent
+                library:apply_theme(outline, "accent", "BackgroundColor3")
             -- 
             
             insert(notifications.notifs, outline)
@@ -1100,12 +1186,12 @@
                 
                 local dark = library:create("Frame", {
                     Parent = outline;
-                    BackgroundTransparency = 0.6;
+                    BackgroundTransparency = 0;
                     Position = dim2(0, 2, 0, 2);
                     BorderColor3 = rgb(0, 0, 0);
                     Size = dim2(1, -4, 1, -4);
                     BorderSizePixel = 0;
-                    BackgroundColor3 = rgb(0, 0, 0)
+                    BackgroundColor3 = themes.preset.background
                 });
 
                 library:create("UIPadding", {
@@ -1132,7 +1218,8 @@
                     BackgroundColor3 = rgb(255, 255, 255)
                 }); 
                 
-                library.watermark_gradient = library:apply_gradient(outline)
+                outline.BackgroundColor3 = themes.preset.accent
+                library:apply_theme(outline, "accent", "BackgroundColor3")
             --
 
             function cfg.update_text(text)
@@ -1222,12 +1309,12 @@
 
                 local dark = library:create("Frame", {
                     Parent = accent;
-                    BackgroundTransparency = 0.6;
+                    BackgroundTransparency = 0;
                     Position = dim2(0, 2, 0, 16);
                     BorderColor3 = rgb(0, 0, 0);
                     Size = dim2(1, -4, 1, -18);
                     BorderSizePixel = 0;
-                    BackgroundColor3 = rgb(0, 0, 0)
+                    BackgroundColor3 = themes.preset.background
                 });
                 
                 local elements = library:create("Frame", {
@@ -1331,8 +1418,8 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(0, 12, 0, 12);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        }); library:apply_theme(accent, tostring(self.count), "BackgroundColor3");    
+                            BackgroundColor3 = themes.preset.outline
+                        }); library:apply_theme(accent, "outline", "BackgroundColor3");    
                         
                         local fill = library:create("Frame", {
                             Parent = accent;
@@ -1432,8 +1519,9 @@
                         Size = dim2(1, 0, 0, cfg.scale);
                         BorderSizePixel = 0;
                         AutomaticSize = Enum.AutomaticSize.Y;
-                        BackgroundColor3 = themes.preset[tostring(self.count)]
-                    }); library:apply_theme(accent, tostring(self.count), "BackgroundColor3")
+                        BackgroundColor3 = themes.preset.outline
+                    }); library:apply_theme(accent, "outline", "BackgroundColor3")
+                    accent.Visible = cfg.visible
                     
                     local inline = library:create("Frame", {
                         Parent = accent;
@@ -1441,7 +1529,7 @@
                         BorderColor3 = rgb(0, 0, 0);
                         Size = dim2(1, -2, 1, -2);
                         BorderSizePixel = 0;
-                        BackgroundColor3 = rgb(35, 35, 35)
+                        BackgroundColor3 = themes.preset.inline
                     }); library:apply_theme(inline, "inline", "BackgroundColor3")
                     
                     local scrollingframe = library:create("ScrollingFrame", {
@@ -1604,8 +1692,8 @@
                         BorderColor3 = rgb(0, 0, 0);
                         Size = dim2(1, 0, 0, 12);
                         BorderSizePixel = 0;
-                        BackgroundColor3 = themes.preset[tostring(self.count)]
-                    }); library:apply_theme(outline, tostring(self.count), "BackgroundColor3")
+                        BackgroundColor3 = themes.preset.outline
+                    }); library:apply_theme(outline, "outline", "BackgroundColor3")
                     
                     local inline = library:create("Frame", {
                         Parent = outline;
@@ -1623,8 +1711,6 @@
                         BorderSizePixel = 0;
                         BackgroundColor3 = themes.preset[tostring(self.count)]
                     }); library:apply_theme(accent, tostring(self.count), "BackgroundColor3")
-                    accent.Visible = cfg.visible
-                    library:apply_gradient(accent)
                 -- 
                 
                 -- Functions 
@@ -1717,8 +1803,8 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(0.5, 0, 0, 16);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        }); library:apply_theme(dropdown_holder, tostring(self.count), "BackgroundColor3")
+                            BackgroundColor3 = themes.preset.outline
+                        }); library:apply_theme(dropdown_holder, "outline", "BackgroundColor3")
                         
                         local inline = library:create("Frame", {
                             Parent = dropdown_holder;
@@ -1726,7 +1812,7 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(1, -2, 1, -2);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = rgb(35, 35, 35)
+                            BackgroundColor3 = themes.preset.inline
                         });
                         
                         local text = library:create("TextLabel", {
@@ -1735,11 +1821,11 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Text = cfg.name;
                             Parent = inline;
-                            Size = dim2(1, 0, 1, 0);
+                            Size = dim2(1, -6, 1, 0);
                             BackgroundTransparency = 1;
-                            Position = dim2(0, 0, 0, 1);
+                            Position = dim2(0, 3, 0, 1);
                             BorderSizePixel = 0;
-                            AutomaticSize = Enum.AutomaticSize.X;
+                            TextTruncate = Enum.TextTruncate.AtEnd;
                             TextSize = 12;
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
@@ -1764,14 +1850,14 @@
                     -- Holder
                         local accent = library:create("Frame", {
                             Parent = library.gui;
-                            Size = dim2(0.0907348021864891, 0, 0.006218905560672283, 20);
+                            Size = dim2(0, 0, 0, 20);
                             Position = dim2(0, 500, 0, 100);
                             BorderColor3 = rgb(0, 0, 0);
                             BorderSizePixel = 0;
                             Visible = false;
                             AutomaticSize = Enum.AutomaticSize.Y;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        });	library:apply_theme(accent, tostring(self.count), "BackgroundColor3")
+                            BackgroundColor3 = themes.preset.outline
+                        });	library:apply_theme(accent, "outline", "BackgroundColor3")
 
                         local inline = library:create("Frame", {
                             Parent = accent;
@@ -1801,6 +1887,7 @@
                             PaddingBottom = dim(0, 2);
                             Parent = accent
                         });
+                        library:raise_popup(accent)
                     --  
                 -- 
                     
@@ -1827,7 +1914,21 @@
                     end 
                     
                     function cfg.set_visible(bool) 
+                        if bool then
+                            library:close_current_element(cfg)
+                            library.current_element_open = cfg
+                        elseif library.current_element_open == cfg then
+                            library.current_element_open = nil
+                        end
                         accent.Visible = bool
+                        if bool then
+                            library:position_popup(accent, dropdown_holder)
+                            task.defer(function()
+                                if accent.Visible then
+                                    library:position_popup(accent, dropdown_holder)
+                                end
+                            end)
+                        end
                     end
                     
                     function cfg.set(value)
@@ -1898,10 +1999,6 @@
                 -- Connections 
                     dropdown_holder.MouseButton1Click:Connect(function()
                         cfg.open = not cfg.open 
-                        
-                        accent.Size = dim2(0, dropdown_holder.AbsoluteSize.X, 0, accent.Size.Y.Offset)
-                        accent.Position = dim2(0, dropdown_holder.AbsolutePosition.X, 0, dropdown_holder.AbsolutePosition.Y + dropdown_holder.AbsoluteSize.Y + 2)
-                        
                         cfg.set_visible(cfg.open)
                     end)
 
@@ -1950,8 +2047,8 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(0, 30, 0, 12);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        }); library:apply_theme(accent, tostring(self.count), "BackgroundColor3")
+                            BackgroundColor3 = themes.preset.outline
+                        }); library:apply_theme(accent, "outline", "BackgroundColor3")
                         
                         local colorpicker_element_color = library:create("Frame", {
                             Parent = accent;
@@ -1988,16 +2085,16 @@
                             Visible = false;
                             Size = dim2(0, 150, 0, 150);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        });	library:apply_theme(colorpicker, tostring(self.count), "BackgroundColor3")
+                            BackgroundColor3 = themes.preset.outline
+                        });	library:apply_theme(colorpicker, "outline", "BackgroundColor3")
 
                         local a = library:create("Frame", {
                             Parent = colorpicker;
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(1, 0, 1, 0);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        }); library:apply_theme(a, tostring(self.count), "BackgroundColor3")
+                            BackgroundColor3 = themes.preset.outline
+                        }); library:apply_theme(a, "outline", "BackgroundColor3")
                         
                         local e = library:create("Frame", {
                             Parent = a;
@@ -2005,9 +2102,8 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(1, -2, 1, -2);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = rgb(0, 0, 0);
-                            BackgroundTransparency = 0.6;
-                            ZIndex = -1
+                            BackgroundColor3 = themes.preset.background;
+                            BackgroundTransparency = 0;
                         }); 
 
                         local _ = library:create("UIPadding", {
@@ -2024,8 +2120,8 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(1, -1, 0, 16);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        }); library:apply_theme(textbox_holder, tostring(self.count), "BackgroundColor3")
+                            BackgroundColor3 = themes.preset.outline
+                        }); library:apply_theme(textbox_holder, "outline", "BackgroundColor3")
                         
                         local textbox = library:create("TextBox", {
                             FontFace = fonts["ProggyClean"];
@@ -2204,6 +2300,7 @@
                     local dragging_sat = false 
                     local dragging_hue = false 
                     local dragging_alpha = false 
+                    library:raise_popup(colorpicker)
 
                     local h, s, v = cfg.color:ToHSV() 
                     local a = cfg.alpha 
@@ -2211,9 +2308,21 @@
                     flags[cfg.flag] = {} 
 
                     function cfg.set_visible(bool) 
+                        if bool then
+                            library:close_current_element(cfg)
+                            library.current_element_open = cfg
+                        elseif library.current_element_open == cfg then
+                            library.current_element_open = nil
+                        end
                         colorpicker.Visible = bool
-                        
-                        colorpicker.Position = dim_offset(colorpicker_element_color.AbsolutePosition.X - 1, colorpicker_element_color.AbsolutePosition.Y + colorpicker_element_color.AbsoluteSize.Y + 65)
+                        if bool then
+                            library:position_popup(colorpicker, colorpicker_element_color)
+                            task.defer(function()
+                                if colorpicker.Visible then
+                                    library:position_popup(colorpicker, colorpicker_element_color)
+                                end
+                            end)
+                        end
                     end
 
                     function cfg.set(color, alpha)
@@ -2251,7 +2360,7 @@
         
                     function cfg.update_color() 
                         local mouse = uis:GetMouseLocation() 
-                        local offset = vec2(mouse.X, mouse.Y - gui_offset) 
+                        local offset = vec2(mouse.X, mouse.Y) 
 
                         if dragging_sat then	
                             s = math.clamp((offset - saturation_value_button.AbsolutePosition).X / saturation_value_button.AbsoluteSize.X, 0, 1)
@@ -2340,8 +2449,8 @@
                         BorderColor3 = rgb(0, 0, 0);
                         Size = dim2(1, 0, 0, 16);
                         BorderSizePixel = 0;
-                        BackgroundColor3 = themes.preset[tostring(self.count)]
-                    }); library:apply_theme(frame, tostring(self.count), "BackgroundColor3")
+                        BackgroundColor3 = themes.preset.outline
+                    }); library:apply_theme(frame, "outline", "BackgroundColor3")
                     frame.Visible = cfg.visible
                     
                     local frame_inline = library:create("Frame", {
@@ -2437,8 +2546,8 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(0.5, 0, 0, 16);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        }); library:apply_theme(keybind_holder, tostring(self.count), "BackgroundColor3")
+                            BackgroundColor3 = themes.preset.outline
+                        }); library:apply_theme(keybind_holder, "outline", "BackgroundColor3")
                         
                         local inline = library:create("Frame", {
                             Parent = keybind_holder;
@@ -2446,7 +2555,7 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Size = dim2(1, -2, 1, -2);
                             BorderSizePixel = 0;
-                            BackgroundColor3 = rgb(35, 35, 35)
+                            BackgroundColor3 = themes.preset.inline
                         });
                         
                         local text = library:create("TextLabel", {
@@ -2455,11 +2564,11 @@
                             BorderColor3 = rgb(0, 0, 0);
                             Text = cfg.name;
                             Parent = inline;
-                            Size = dim2(1, 0, 1, 0);
+                            Size = dim2(1, -6, 1, 0);
                             BackgroundTransparency = 1;
-                            Position = dim2(0, 0, 0, -1);
+                            Position = dim2(0, 3, 0, -1);
                             BorderSizePixel = 0;
-                            AutomaticSize = Enum.AutomaticSize.X;
+                            TextTruncate = Enum.TextTruncate.AtEnd;
                             TextSize = 12;
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
@@ -2485,13 +2594,13 @@
                         local accent = library:create("Frame", {
                             Parent = library.gui;
                             Visible = false;
-                            Size = dim2(0.0907348021864891, 0, 0.006218905560672283, 20);
+                            Size = dim2(0, 0, 0, 20);
                             Position = dim2(0, 500, 0, 100);
                             BorderColor3 = rgb(0, 0, 0);
                             BorderSizePixel = 0;
                             AutomaticSize = Enum.AutomaticSize.Y;
-                            BackgroundColor3 = themes.preset[tostring(self.count)]
-                        });	library:apply_theme(accent, tostring(self.count), "BackgroundColor3")
+                            BackgroundColor3 = themes.preset.outline
+                        });	library:apply_theme(accent, "outline", "BackgroundColor3")
 
                         local inline = library:create("Frame", {
                             Parent = accent;
@@ -2523,6 +2632,7 @@
                         });
 
                         local options = {"Hold", "Toggle", "Always"}
+                        library:raise_popup(accent)
                         
                         for _, v in options do
                             local option = library:create("TextButton", {
@@ -2632,10 +2742,21 @@
                     end
 
                     function cfg.set_visible(bool)
+                        if bool then
+                            library:close_current_element(cfg)
+                            library.current_element_open = cfg
+                        elseif library.current_element_open == cfg then
+                            library.current_element_open = nil
+                        end
                         accent.Visible = bool
-                        
-                        accent.Size = dim2(0, keybind_holder.AbsoluteSize.X, 0, accent.Size.Y.Offset)
-                        accent.Position = dim2(0, keybind_holder.AbsolutePosition.X, 0, keybind_holder.AbsolutePosition.Y + keybind_holder.AbsoluteSize.Y + 2)
+                        if bool then
+                            library:position_popup(accent, keybind_holder)
+                            task.defer(function()
+                                if accent.Visible then
+                                    library:position_popup(accent, keybind_holder)
+                                end
+                            end)
+                        end
                     end
                 -- 
 
@@ -2755,7 +2876,8 @@
                     BorderSizePixel = 0,
                     BackgroundColor3 = rgb(255, 255, 255),
                 })
-                library:apply_gradient(line)
+                line.BackgroundColor3 = themes.preset.accent
+                library:apply_theme(line, "accent", "BackgroundColor3")
 
                 if options.name then
                     local caption = library:create("TextLabel", {
@@ -2792,8 +2914,8 @@
                         BorderColor3 = rgb(0, 0, 0);
                         Size = dim2(1, 0, 0, 16);
                         BorderSizePixel = 0;
-                        BackgroundColor3 = themes.preset[tostring(self.count)]
-                    }); library:apply_theme(frame, tostring(self.count), "BackgroundColor3")
+                        BackgroundColor3 = themes.preset.outline
+                    }); library:apply_theme(frame, "outline", "BackgroundColor3")
                     
                     local frame_inline = library:create("Frame", {
                         Parent = frame;
@@ -2821,7 +2943,11 @@
                 -- 
 
                 -- Connections 
-                    library:hover(frame_inline, {BackgroundColor3 = themes.preset.inline}, {BackgroundColor3 = themes.preset.surface})
+                    library:hover(frame_inline, function()
+                        return {BackgroundColor3 = themes.preset.inline}
+                    end, function()
+                        return {BackgroundColor3 = themes.preset.surface}
+                    end)
                     if options.tooltip then
                         library:tooltip(frame, options.tooltip)
                     end
@@ -2858,53 +2984,47 @@
 
                 local section = main:column({}):section({name = "Other", size = 1, default = true})
                 section:keybind({name = "Menu bind", callback = function(bool) window.toggle_menu(bool) end, default = true})
-                section:colorpicker({name = "Gradient 1", callback = function(color)                    
-                    library:update_theme("1", color)
+                section:separator({name = "Theme"})
 
-                    library.gradient.Color = rgbseq{
-                        rgbkey(0, themes.preset["1"]), 
-                        rgbkey(0.5, themes.preset["2"]),
-                        rgbkey(1, themes.preset["3"]),
-                    };
+                local theme_pickers = {}
+                section:dropdown({
+                    name = "Preset",
+                    items = {"Default", "Graphite", "Midnight"},
+                    default = "Default",
+                    flag = "menu_theme_preset",
+                    callback = function(name)
+                        local palette = library.themes[name]
+                        if not palette then
+                            return
+                        end
+                        library:load_theme(palette)
+                        for key, picker in theme_pickers do
+                            if palette[key] then
+                                picker.set(palette[key])
+                            end
+                        end
+                    end,
+                })
 
-                    library.watermark_gradient.Color = rgbseq{
-                        rgbkey(0, themes.preset["1"]), 
-                        rgbkey(0.5, themes.preset["2"]),
-                        rgbkey(1, themes.preset["3"]),
-                    };
-                end, color = themes.preset["1"]})
-                section:colorpicker({name = "Gradient 2", callback = function(color)
-                    library:update_theme("2", color)
+                local function add_theme_color(name, key)
+                    theme_pickers[key] = section:colorpicker({
+                        name = name,
+                        flag = "menu_theme_" .. key,
+                        color = themes.preset[key],
+                        callback = function(value)
+                            library:update_theme(key, value)
+                        end,
+                    })
+                end
 
-                    library.gradient.Color = rgbseq{
-                        rgbkey(0, themes.preset["1"]), 
-                        rgbkey(0.5, themes.preset["2"]),
-                        rgbkey(1, themes.preset["3"]),
-                    };
-
-                    library.watermark_gradient.Color = rgbseq{
-                        rgbkey(0, themes.preset["1"]), 
-                        rgbkey(0.5, themes.preset["2"]),
-                        rgbkey(1, themes.preset["3"]),
-                    };
-                end, color = themes.preset["2"]})
-                section:colorpicker({name = "Gradient 3", callback = function(color)
-                    library:update_theme("3", color)
-
-                    library.gradient.Color = rgbseq{
-                        rgbkey(0, themes.preset["1"]), 
-                        rgbkey(0.5, themes.preset["2"]),
-                        rgbkey(1, themes.preset["3"]),
-                    };
-
-                    library.watermark_gradient.Color = rgbseq{
-                        rgbkey(0, themes.preset["1"]), 
-                        rgbkey(0.5, themes.preset["2"]),
-                        rgbkey(1, themes.preset["3"]),
-                    };
-                end, color = themes.preset["3"]})
-
-                main:column({})
+                add_theme_color("Accent", "accent")
+                add_theme_color("Background", "background")
+                add_theme_color("Surface", "surface")
+                add_theme_color("Inline", "inline")
+                add_theme_color("Outline", "outline")
+                add_theme_color("Text", "text")
+                add_theme_color("Muted text", "muted")
+                add_theme_color("Text outline", "text_outline")
             end
         -- 
     -- 
