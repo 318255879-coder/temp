@@ -1804,6 +1804,10 @@
 
                         cfg.callback(bool)
 
+                        if cfg.activation and not cfg._activation_driving then
+                            cfg.activation.sync_active(bool)
+                        end
+
                         if cfg.folding then 
                             elements.Visible = bool
                         end
@@ -1819,21 +1823,60 @@
 
                     config_flags[cfg.flag] = cfg.set
                     cfg.instance = toggle
-                    cfg._colorpicker_count = 0
                     cfg.attachments = {}
+                    cfg._attachment_right = 16
+
+                    function cfg:_attach(control, width)
+                        local instance = control and control.instance
+                        if not instance then
+                            return control
+                        end
+
+                        width = max(tonumber(width) or 12, 12)
+                        instance.AnchorPoint = vec2(1, 0)
+                        instance.Position = dim2(1, -cfg._attachment_right, 0, 0)
+                        instance.Size = dim2(0, width, 0, 12)
+                        cfg._attachment_right += width + 3
+                        insert(cfg.attachments, control)
+                        return control
+                    end
 
                     function cfg:colorpicker(color_options)
                         color_options = table.clone(color_options or {})
-                        cfg._colorpicker_count += 1
                         color_options.parent = toggle
                         color_options.no_label = true
                         color_options.element_anchor_point = vec2(1, 0)
                         color_options.element_size = dim2(0, 12, 0, 12)
-                        color_options.element_position = dim2(1, -16 - ((cfg._colorpicker_count - 1) * 15), 0, 0)
+                        color_options.element_position = dim2(1, -cfg._attachment_right, 0, 0)
                         color_options.swatch_size = dim2(1, 0, 1, 0)
                         local picker = library:colorpicker(color_options)
-                        insert(cfg.attachments, picker)
-                        return picker
+                        return cfg:_attach(picker, 12)
+                    end
+
+                    function cfg:keybind(keybind_options)
+                        keybind_options = table.clone(keybind_options or {})
+                        local user_callback = keybind_options.callback or function() end
+                        local width = max(tonumber(keybind_options.width) or 48, 28)
+
+                        keybind_options.parent = toggle
+                        keybind_options.no_label = true
+                        keybind_options.element_anchor_point = vec2(1, 0)
+                        keybind_options.element_position = dim2(1, -cfg._attachment_right, 0, 0)
+                        keybind_options.element_size = dim2(0, width, 0, 12)
+                        keybind_options.flag = keybind_options.flag or (tostring(cfg.flag) .. "_keybind")
+                        if keybind_options.default == nil then
+                            keybind_options.default = cfg.enabled
+                        end
+                        keybind_options.callback = function(active)
+                            cfg._activation_driving = true
+                            cfg.set(active)
+                            cfg._activation_driving = false
+                            user_callback(active)
+                        end
+
+                        local binding = library:keybind(keybind_options)
+                        cfg.activation = binding
+                        return cfg:_attach(binding, width)
                     end
 
                 -- 
@@ -2935,6 +2978,8 @@
             end 
 
             function library:keybind(options) 
+                options = options or {}
+                local attached = options.no_label == true or options.parent ~= nil
                 local cfg = {
                     flag = options.flag or options.name or "Flag",
                     callback = options.callback or function() end,
@@ -2955,27 +3000,29 @@
                 -- Instances
                     -- Element 
                         local keybind = library:create("Frame", {
-                            Parent = self.elements;
+                            Parent = options.parent or self.elements;
+                            AnchorPoint = options.element_anchor_point or vec2(0, 0);
+                            Position = options.element_position or dim2(0, 0, 0, 0);
                             BackgroundTransparency = 1;
                             BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(1, 0, 0, 16);
+                            Size = options.element_size or dim2(1, 0, 0, 16);
                             BorderSizePixel = 0;
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
                         
                         local keybind_holder = library:create("TextButton", {
-                            AnchorPoint = vec2(1, 0);
+                            AnchorPoint = attached and vec2(0, 0) or vec2(1, 0);
                             AutoButtonColor = false; 
                             Text = "";
                             Parent = keybind;
-                            Position = dim2(1, 0, 0, 0);
+                            Position = attached and dim2(0, 0, 0, 0) or dim2(1, 0, 0, 0);
                             BorderColor3 = rgb(0, 0, 0);
-                            Size = dim2(0.5, 0, 0, 16);
+                            Size = attached and dim2(1, 0, 1, 0) or dim2(0.5, 0, 0, 16);
                             BorderSizePixel = 0;
                             BackgroundColor3 = themes.preset.outline
                         }); library:apply_theme(keybind_holder, "outline", "BackgroundColor3")
                         
-                        local inline = library:create("Frame", {
+                        local keybind_inline = library:create("Frame", {
                             Parent = keybind_holder;
                             Position = dim2(0, 1, 0, 1);
                             BorderColor3 = rgb(0, 0, 0);
@@ -2989,7 +3036,7 @@
                             TextColor3 = rgb(255, 255, 255);
                             BorderColor3 = rgb(0, 0, 0);
                             Text = cfg.name;
-                            Parent = inline;
+                            Parent = keybind_inline;
                             Size = dim2(1, -6, 1, 0);
                             BackgroundTransparency = 1;
                             Position = dim2(0, 3, 0, 0);
@@ -3000,21 +3047,24 @@
                             BackgroundColor3 = rgb(255, 255, 255)
                         });
                         
-                        local title = library:create("TextLabel", {
-                            FontFace = fonts["ProggyClean"];
-                            TextColor3 = rgb(255, 255, 255);
-                            BorderColor3 = rgb(0, 0, 0);
-                            Text = cfg.name;
-                            Parent = keybind;
-                            Size = dim2(1, 0, 1, 0);
-                            Position = dim2(0, 1, 0, 0);
-                            BackgroundTransparency = 1;
-                            TextXAlignment = Enum.TextXAlignment.Left;
-                            BorderSizePixel = 0;
-                            AutomaticSize = Enum.AutomaticSize.X;
-                            TextSize = 12;
-                            BackgroundColor3 = rgb(255, 255, 255)
-                        });
+                        if not options.no_label then
+                            library:create("TextLabel", {
+                                FontFace = fonts["ProggyClean"];
+                                TextColor3 = rgb(255, 255, 255);
+                                BorderColor3 = rgb(0, 0, 0);
+                                Text = cfg.name;
+                                Parent = keybind;
+                                Size = dim2(1, 0, 1, 0);
+                                Position = dim2(0, 1, 0, 0);
+                                BackgroundTransparency = 1;
+                                TextXAlignment = Enum.TextXAlignment.Left;
+                                BorderSizePixel = 0;
+                                AutomaticSize = Enum.AutomaticSize.X;
+                                TextSize = 12;
+                                BackgroundColor3 = rgb(255, 255, 255)
+                            });
+                        end
+                        cfg.instance = keybind
                     -- 
 
                     -- Holder
@@ -3110,73 +3160,102 @@
                         end
                     end 
 
-                    function cfg.set_mode(mode) 
-                        mode = ({hold = "Hold", toggle = "Toggle", always = "Always"})[string.lower(tostring(mode))] or "Toggle"
-                        cfg.mode = mode 
+                    -- Canonical state writer: mode changes emit once and false config values
+                    -- are preserved.
+                    local function normalize_mode(mode)
+                        return ({hold = "Hold", toggle = "Toggle", always = "Always"})[string.lower(tostring(mode))] or "Toggle"
+                    end
 
-                        if mode == "Always" then
-                            cfg.set(true)
-                        elseif mode == "Hold" then
-                            cfg.set(false)
+                    local function key_text(key)
+                        if key == nil or key == "..." then
+                            return "..."
                         end
 
-                        flags[cfg.flag]["mode"] = mode
-                        cfg.modify_mode_color(mode)
-                    end 
+                        local display = keys[key]
+                        if display then
+                            return display
+                        end
 
-                    function cfg.set(input)
-                        if type(input) == "boolean" then 
-                            local __cached = input 
+                        return tostring(key):gsub("Enum.KeyCode.", ""):gsub("Enum.UserInputType.", "")
+                    end
 
-                            if cfg.mode == "Always" then 
-                                __cached = true 
-                            end 
-
-                            cfg.active = __cached 
-                            cfg.callback(__cached)
-                        elseif tostring(input):find("Enum") then 
-                            input = input.Name == "Escape" and "..." or input
-
-                            cfg.key = input or "..."	
-
-                            cfg.callback(cfg.active or false)
-                        elseif find({"Toggle", "Hold", "Always"}, input) then 
-                            cfg.set_mode(input)
-
-                            if input == "Always" then 
-                                cfg.active = true 
-                            end 
-
-                            cfg.callback(cfg.active or false)
-                        elseif type(input) == "table" then 
-                            input.key = type(input.key) == "string" and input.key ~= "..." and library:convert_enum(input.key) or input.key
-
-                            input.key = input.key == Enum.KeyCode.Escape and "..." or input.key
-                            cfg.key = input.key or "..."
-                            
-                            cfg.mode = input.mode or "Toggle"
-                            cfg.set_mode(input.mode)
-
-                            if input.active then
-                                cfg.active = input.active
-                            end
-                        end 
-
+                    local function write_state(fire_callback)
                         flags[cfg.flag] = {
                             mode = cfg.mode,
-                            key = cfg.key, 
-                            active = cfg.active
+                            key = cfg.key,
+                            active = cfg.active,
                         }
+                        text.Text = key_text(cfg.key)
+                        cfg.modify_mode_color(cfg.mode)
 
-                        local _text = tostring(cfg.key) ~= "Enums" and (keys[cfg.key] or tostring(cfg.key):gsub("Enum.", "")) or nil
-                        local __text = _text and (tostring(_text):gsub("KeyCode.", ""):gsub("UserInputType.", ""))
-                        
-                        text.Text = " ".. __text .." "
+                        if fire_callback then
+                            cfg.callback(cfg.active)
+                        end
+                    end
 
-                        -- if keybind_list_text then
-                        --     keybind_list_text.Text = "[ ".. __text  .." ] ".. cfg.name ..":".. string.lower(cfg.mode) .."";
-                        --     keybind_list_text.Visible = cfg.active
-                        -- end
+                    function cfg.sync_active(value)
+                        cfg.active = not not value
+                        write_state(false)
+                    end
+
+                    function cfg.set_mode(mode)
+                        cfg.mode = normalize_mode(mode)
+                        if cfg.mode == "Always" then
+                            cfg.active = true
+                        elseif cfg.mode == "Hold" then
+                            cfg.active = false
+                        end
+                        write_state(true)
+                    end
+
+                    function cfg.set(input)
+                        if type(input) == "boolean" then
+                            cfg.active = cfg.mode == "Always" or input
+                            write_state(true)
+                            return
+                        end
+
+                        if typeof(input) == "EnumItem" then
+                            cfg.key = input == Enum.KeyCode.Escape and nil or input
+                            write_state(false)
+                            return
+                        end
+
+                        if type(input) == "string" and find({"Toggle", "Hold", "Always"}, input) then
+                            cfg.set_mode(input)
+                            return
+                        end
+
+                        if type(input) == "table" then
+                            local configured_key = input.key
+                            if type(configured_key) == "string" then
+                                if configured_key == "..." or configured_key == "nil" then
+                                    configured_key = nil
+                                else
+                                    local success, converted = pcall(library.convert_enum, library, configured_key)
+                                    configured_key = success and converted or nil
+                                end
+                            end
+
+                            if typeof(configured_key) == "EnumItem" and configured_key ~= Enum.KeyCode.Escape then
+                                cfg.key = configured_key
+                            else
+                                cfg.key = nil
+                            end
+
+                            cfg.mode = normalize_mode(input.mode or cfg.mode)
+                            if input.active ~= nil then
+                                cfg.active = not not input.active
+                            end
+                            if cfg.mode == "Always" then
+                                cfg.active = true
+                            elseif cfg.mode == "Hold" then
+                                -- A saved config can be written while the key is held; never
+                                -- restore that transient state on the next load.
+                                cfg.active = false
+                            end
+                            write_state(true)
+                        end
                     end
 
                     function cfg.set_visible(bool)
@@ -3195,21 +3274,28 @@
                 -- 
 
                 -- Connections
-                    keybind_holder.MouseButton1Down:Connect(function()
-                        task.wait()
-                        text.Text = "..."	
-
+                    keybind_holder.MouseButton1Click:Connect(function()
                         if cfg.binding then
                             cfg.binding:Disconnect()
                             cfg.binding = nil
                         end
 
-                        cfg.binding = library:connection(uis.InputBegan, function(keycode, game_event)
-                            local selected_key = keycode.UserInputType == Enum.UserInputType.Keyboard and keycode.KeyCode or keycode.UserInputType
-                            cfg.set(selected_key)
+                        if cfg.open then
+                            cfg.open = false
+                            cfg.set_visible(false)
+                        end
+                        text.Text = "..."
 
-                            cfg.binding:Disconnect() 
-                            cfg.binding = nil
+                        task.defer(function()
+                            cfg.binding = library:connection(uis.InputBegan, function(keycode)
+                                local selected_key = keycode.UserInputType == Enum.UserInputType.Keyboard and keycode.KeyCode or keycode.UserInputType
+                                cfg.set(selected_key)
+
+                                if cfg.binding then
+                                    cfg.binding:Disconnect()
+                                    cfg.binding = nil
+                                end
+                            end)
                         end)
                     end)
 
@@ -3219,33 +3305,40 @@
                         cfg.set_visible(cfg.open) 
                     end)
 
-                    library:connection(uis.InputBegan, function(input, game_event) 
-                        if not game_event then 
-                            local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
-                            if selected_key == cfg.key then 
-                                if cfg.mode == "Toggle" then 
-                                    cfg.active = not cfg.active
-                                    cfg.set(cfg.active)
-                                elseif cfg.mode == "Hold" then 
-                                    cfg.set(true)
-                                end
+                    library:connection(uis.InputBegan, function(input)
+                        if cfg.binding then
+                            return
+                        end
+
+                        local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
+                        if cfg.key ~= nil and selected_key == cfg.key then
+                            if cfg.mode == "Toggle" then
+                                cfg.set(not cfg.active)
+                            elseif cfg.mode == "Hold" then
+                                cfg.set(true)
                             end
                         end
                     end)
 
-                    library:connection(uis.InputEnded, function(input, game_event) 
-                        if game_event then 
-                            return 
-                        end 
-
+                    library:connection(uis.InputEnded, function(input)
                         local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
-
-                        if selected_key == cfg.key then
-                            if cfg.mode == "Hold" then 
-                                cfg.set(false)
-                            end
+                        if not cfg.binding and cfg.key ~= nil and selected_key == cfg.key and cfg.mode == "Hold" then
+                            cfg.set(false)
                         end
 
+                        if input.UserInputType == Enum.UserInputType.MouseButton1 and cfg.open then
+                            if not (library:mouse_in_frame(keybind_holder) or library:mouse_in_frame(accent)) then
+                                cfg.open = false
+                                cfg.set_visible(false)
+                            end
+                        end
+                    end)
+
+                    keybind_holder.MouseEnter:Connect(function()
+                        library:tween(keybind_inline, {BackgroundColor3 = themes.preset.surface}, 0.1)
+                    end)
+                    keybind_holder.MouseLeave:Connect(function()
+                        library:tween(keybind_inline, {BackgroundColor3 = themes.preset.inline}, 0.1)
                     end)
                 --
 
