@@ -1635,6 +1635,10 @@
                     BorderSizePixel = 0;
                     BackgroundColor3 = themes.preset.panel
                 }); library:apply_theme(accent, "panel", "BackgroundColor3");
+                library:create("UIPadding", {
+                    Parent = accent,
+                    PaddingBottom = dim(0, 1),
+                })
 
                 local dark = library:create("Frame", {
                     Parent = accent;
@@ -2415,11 +2419,6 @@
                         cfg.set_visible(cfg.open)
                     end)
 
-                    library:hover(inline, function()
-                        return {BackgroundColor3 = themes.preset.inline}
-                    end, function()
-                        return {BackgroundColor3 = themes.preset.surface}
-                    end)
                 -- 
 
                 return setmetatable(cfg, library)
@@ -2824,12 +2823,6 @@
                         end
                     end)
 
-                    library:hover(accent, function()
-                        return {BackgroundColor3 = themes.preset.outline}
-                    end, function()
-                        return {BackgroundColor3 = themes.preset.surface}
-                    end)
-
                     local function click_position(x, y)
                         local mouse_position = uis:GetMouseLocation()
                         return vec2(tonumber(x) or mouse_position.X, tonumber(y) or mouse_position.Y)
@@ -3224,12 +3217,6 @@
                         cfg.open = not cfg.open 
 
                         cfg.set_visible(cfg.open) 
-                    end)
-
-                    library:hover(inline, function()
-                        return {BackgroundColor3 = themes.preset.inline}
-                    end, function()
-                        return {BackgroundColor3 = themes.preset.surface}
                     end)
 
                     library:connection(uis.InputBegan, function(input, game_event) 
