@@ -220,7 +220,9 @@ end
 
 local function setLine(frame, origin, destination, thickness)
     local delta = destination - origin
-    frame.Position = fromOffset(origin.X, origin.Y)
+    local midpoint = (origin + destination) * 0.5
+    frame.AnchorPoint = vec2(0.5, 0.5)
+    frame.Position = fromOffset(floor(midpoint.X + 0.5), floor(midpoint.Y + 0.5))
     frame.Size = fromOffset(delta.Magnitude, thickness)
     frame.Rotation = deg(atan2(delta.Y, delta.X))
 end
@@ -505,23 +507,6 @@ function Visuals:_text(properties)
     return create("TextLabel", properties)
 end
 
-function Visuals:_side(rotation)
-    local shadow = create("Frame", {
-        Parent = self.gui,
-        BorderSizePixel = 0,
-        BackgroundColor3 = self.theme.outline,
-        ZIndex = 3,
-    })
-    local side = create("Frame", {
-        Parent = self.gui,
-        BorderSizePixel = 0,
-        BackgroundColor3 = rgb(255, 255, 255),
-        ZIndex = 4,
-    })
-    local gradient = self:_gradient(side, nil, rotation, "box")
-    return shadow, side, gradient
-end
-
 function Visuals:Add(target, options)
     if self.entities[target] then
         self.entities[target]:SetOptions(options or {})
@@ -538,6 +523,7 @@ function Visuals:Add(target, options)
     end
     entity.objects = {}
     entity.gradients = {}
+    entity.strokes = {}
     entity.destroyed = false
 
     local objects = entity.objects
@@ -550,10 +536,33 @@ function Visuals:Add(target, options)
         ZIndex = 1,
     })
 
-    objects.top_shadow, objects.top, entity.gradients.top = self:_side(gradient_rotation)
-    objects.bottom_shadow, objects.bottom, entity.gradients.bottom = self:_side(gradient_rotation)
-    objects.left_shadow, objects.left, entity.gradients.left = self:_side(gradient_rotation + 90)
-    objects.right_shadow, objects.right, entity.gradients.right = self:_side(gradient_rotation + 90)
+    objects.box_shadow = create("Frame", {
+        Parent = self.gui,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+    })
+    entity.strokes.box_shadow = create("UIStroke", {
+        Parent = objects.box_shadow,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Color = self.theme.outline,
+        LineJoinMode = Enum.LineJoinMode.Miter,
+        Thickness = entity.options.box_thickness + 2,
+    })
+    objects.box = create("Frame", {
+        Parent = self.gui,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 4,
+    })
+    entity.strokes.box = create("UIStroke", {
+        Parent = objects.box,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Color = rgb(255, 255, 255),
+        LineJoinMode = Enum.LineJoinMode.Miter,
+        Thickness = entity.options.box_thickness,
+    })
+    entity.gradients.box = self:_gradient(entity.strokes.box, nil, gradient_rotation, "box")
 
     objects.name = self:_text({
         FontFace = self.fonts.ProggyTiny,
@@ -604,14 +613,14 @@ function Visuals:Add(target, options)
     end
     objects.tracer_shadow = create("Frame", {
         Parent = self.gui,
-        AnchorPoint = vec2(0, 0.5),
+        AnchorPoint = vec2(0.5, 0.5),
         BorderSizePixel = 0,
         BackgroundColor3 = self.theme.outline,
         ZIndex = 2,
     })
     objects.tracer = create("Frame", {
         Parent = self.gui,
-        AnchorPoint = vec2(0, 0.5),
+        AnchorPoint = vec2(0.5, 0.5),
         BorderSizePixel = 0,
         BackgroundColor3 = rgb(255, 255, 255),
         ZIndex = 3,
@@ -722,7 +731,7 @@ function Visuals:_syncFlags()
         if value ~= nil and self.flag_values[flag] ~= value then
             self.flag_values[flag] = value
             if option == "enabled" then
-                self.enabled = value
+                self:SetEnabled(value)
             else
                 self.options[option] = value
                 for _, entity in self.entities do
@@ -772,22 +781,19 @@ function Visuals:SetGradient(colors, transparency, from_theme)
             end
         end
     end
-    -- Each box edge owns its gradient. Refresh them directly as well so changing
-    -- a picker always affects existing boxes, not just text/tracer records.
+    -- The box uses one UIStroke and one UIGradient so the perimeter is continuous.
     for _, entity in self.entities do
-        for _, key in {"top", "bottom", "left", "right"} do
-            local edge = entity.objects[key]
-            local gradient = entity.gradients[key]
-            if edge and edge.Parent then
-                edge.BackgroundColor3 = entity.options.gradient ~= false and rgb(255, 255, 255) or self.theme["1"]
-            end
-            if gradient and gradient.Parent then
-                gradient.Enabled = entity.options.gradient ~= false
-                gradient.Color = sequence
-                if transparency ~= nil then
-                    local sequence_value = numberSequence(transparency)
-                    if sequence_value then gradient.Transparency = sequence_value end
-                end
+        local gradient = entity.gradients.box
+        local stroke = entity.strokes and entity.strokes.box
+        if stroke and stroke.Parent then
+            stroke.Color = entity.options.gradient ~= false and rgb(255, 255, 255) or self.theme["1"]
+        end
+        if gradient and gradient.Parent then
+            gradient.Enabled = entity.options.gradient ~= false
+            gradient.Color = sequence
+            if transparency ~= nil then
+                local sequence_value = numberSequence(transparency)
+                if sequence_value then gradient.Transparency = sequence_value end
             end
         end
     end
@@ -891,8 +897,9 @@ function Entity:_applyTheme()
     objects.tracer_shadow.BackgroundColor3 = theme.outline
     objects.highlight.FillColor = theme["2"]
     objects.highlight.OutlineColor = theme["1"]
-    for _, key in {"top_shadow", "bottom_shadow", "left_shadow", "right_shadow"} do
-        objects[key].BackgroundColor3 = theme.outline
+    if self.strokes then
+        self.strokes.box_shadow.Color = theme.outline
+        self.strokes.box.Color = self.options.gradient and rgb(255, 255, 255) or theme["1"]
     end
     for _, key in {"name", "health_text", "distance", "tool"} do
         local gradient = self.gradients[key]
@@ -909,12 +916,12 @@ function Entity:SetOptions(options)
     self.objects.fill.BackgroundTransparency = self.options.box_fill_transparency
     self.objects.highlight.FillTransparency = self.options.chams_fill_transparency
     self.objects.highlight.OutlineTransparency = self.options.chams_outline_transparency
-    for _, key in {"top", "bottom", "left", "right"} do
-        local gradient = self.gradients[key]
-        if gradient then
-            gradient.Enabled = self.options.gradient
-        end
-        self.objects[key].BackgroundColor3 = self.options.gradient and rgb(255, 255, 255) or self.library.theme["1"]
+    local box_gradient = self.gradients.box
+    if box_gradient then
+        box_gradient.Enabled = self.options.gradient
+    end
+    if self.strokes then
+        self.strokes.box.Color = self.options.gradient and rgb(255, 255, 255) or self.library.theme["1"]
     end
     if self.gradients.name then
         self.gradients.name.Enabled = self.options.name_gradient
@@ -1064,27 +1071,18 @@ function Entity:_update()
     setProperty(objects.fill, "Size", fromOffset(max(0, width - thickness * 2), max(0, height - thickness * 2)))
 
     local box_visible = options.box
-    for _, key in {"top", "bottom", "left", "right", "top_shadow", "bottom_shadow", "left_shadow", "right_shadow"} do
-        setProperty(objects[key], "Visible", box_visible)
+    setProperty(objects.box_shadow, "Visible", box_visible)
+    setProperty(objects.box, "Visible", box_visible)
+    setProperty(objects.box_shadow, "Position", fromOffset(top_left.X, top_left.Y))
+    setProperty(objects.box_shadow, "Size", fromOffset(width, height))
+    setProperty(objects.box, "Position", fromOffset(top_left.X, top_left.Y))
+    setProperty(objects.box, "Size", fromOffset(width, height))
+    if self.strokes.box_shadow.Thickness ~= shadow_thickness then
+        self.strokes.box_shadow.Thickness = shadow_thickness
     end
-
-    setProperty(objects.top_shadow, "Position", fromOffset(top_left.X - 1, top_left.Y - 1))
-    setProperty(objects.top_shadow, "Size", fromOffset(width + 2, shadow_thickness))
-    setProperty(objects.bottom_shadow, "Position", fromOffset(top_left.X - 1, bottom_right.Y - thickness - 1))
-    setProperty(objects.bottom_shadow, "Size", fromOffset(width + 2, shadow_thickness))
-    setProperty(objects.left_shadow, "Position", fromOffset(top_left.X - 1, top_left.Y - 1))
-    setProperty(objects.left_shadow, "Size", fromOffset(shadow_thickness, height + 2))
-    setProperty(objects.right_shadow, "Position", fromOffset(bottom_right.X - thickness - 1, top_left.Y - 1))
-    setProperty(objects.right_shadow, "Size", fromOffset(shadow_thickness, height + 2))
-
-    setProperty(objects.top, "Position", fromOffset(top_left.X, top_left.Y))
-    setProperty(objects.top, "Size", fromOffset(width, thickness))
-    setProperty(objects.bottom, "Position", fromOffset(top_left.X, bottom_right.Y - thickness))
-    setProperty(objects.bottom, "Size", fromOffset(width, thickness))
-    setProperty(objects.left, "Position", fromOffset(top_left.X, top_left.Y))
-    setProperty(objects.left, "Size", fromOffset(thickness, height))
-    setProperty(objects.right, "Position", fromOffset(bottom_right.X - thickness, top_left.Y))
-    setProperty(objects.right, "Size", fromOffset(thickness, height))
+    if self.strokes.box.Thickness ~= thickness then
+        self.strokes.box.Thickness = thickness
+    end
 
     setProperty(objects.name, "Visible", options.name)
     setProperty(objects.name, "Text", options.display_name or (self.player and self.player.DisplayName) or model.Name)
